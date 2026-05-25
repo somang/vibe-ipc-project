@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
-import { Camera, CameraOff, Settings2, Waves } from "lucide-react"
+import { Camera, CameraOff, Settings2, Waves, Volume2, VolumeX } from "lucide-react"
 
 declare global {
   interface Window {
@@ -105,11 +105,20 @@ export default function WaterRipplePage() {
   const [minMotionArea, setMinMotionArea] = useState(500)
   const [rippleStrength, setRippleStrength] = useState(150)
   const [waterOpacity, setWaterOpacity] = useState(0.4)
+  
+  // Audio settings
+  const [isMuted, setIsMuted] = useState(false)
+  const [splashVolume, setSplashVolume] = useState(0.3)
+  const [ambientVolume, setAmbientVolume] = useState(0.2)
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
   const prevFrameRef = useRef<any>(null)
   const waterSimRef = useRef<WaterSimulation | null>(null)
+  
+  // Audio refs
+  const ambientAudioRef = useRef<HTMLAudioElement | null>(null)
+  const lastSplashTimeRef = useRef<number>(0)
 
   // Load OpenCV.js
   useEffect(() => {
@@ -139,6 +148,50 @@ export default function WaterRipplePage() {
     loadOpenCV()
   }, [])
 
+  // Audio URLs (public domain water sounds)
+  const SPLASH_SOUND_URL = "https://cdn.freesound.org/previews/398/398032_1676145-lq.mp3"
+  const AMBIENT_SOUND_URL = "https://cdn.freesound.org/previews/531/531015_6170507-lq.mp3"
+
+  // Play water splash sound
+  const playSplashSound = useCallback(() => {
+    if (isMuted) return
+    
+    const now = Date.now()
+    // Throttle splash sounds to avoid overlap (min 150ms between splashes)
+    if (now - lastSplashTimeRef.current < 150) return
+    lastSplashTimeRef.current = now
+    
+    const splash = new Audio(SPLASH_SOUND_URL)
+    splash.volume = splashVolume
+    splash.playbackRate = 0.8 + Math.random() * 0.4 // Slight variation
+    splash.play().catch(() => {}) // Ignore autoplay errors
+  }, [isMuted, splashVolume])
+
+  // Start ambient music
+  const startAmbientMusic = useCallback(() => {
+    if (!ambientAudioRef.current) {
+      ambientAudioRef.current = new Audio(AMBIENT_SOUND_URL)
+      ambientAudioRef.current.loop = true
+    }
+    ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
+    ambientAudioRef.current.play().catch(() => {})
+  }, [isMuted, ambientVolume])
+
+  // Stop ambient music
+  const stopAmbientMusic = useCallback(() => {
+    if (ambientAudioRef.current) {
+      ambientAudioRef.current.pause()
+      ambientAudioRef.current.currentTime = 0
+    }
+  }, [])
+
+  // Update ambient volume when settings change
+  useEffect(() => {
+    if (ambientAudioRef.current) {
+      ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
+    }
+  }, [isMuted, ambientVolume])
+
   const startCamera = async () => {
     setError(null)
 
@@ -163,6 +216,7 @@ export default function WaterRipplePage() {
             const h = videoRef.current!.videoHeight
             waterSimRef.current = new WaterSimulation(Math.floor(w / 4), Math.floor(h / 4))
             setIsRunning(true)
+            startAmbientMusic()
           }).catch((err) => {
             setError(`Error starting playback: ${err?.message}`)
           })
@@ -198,9 +252,10 @@ export default function WaterRipplePage() {
       prevFrameRef.current.delete()
       prevFrameRef.current = null
     }
+    stopAmbientMusic()
     setIsRunning(false)
     setMotionAreas(0)
-  }, [])
+  }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
     if (!cvReady || !videoRef.current || !canvasRef.current || !waterCanvasRef.current || !isRunning) return
@@ -270,6 +325,7 @@ export default function WaterRipplePage() {
       if (waterSim) {
         const scaleX = waterSim.width / video.videoWidth
         const scaleY = waterSim.height / video.videoHeight
+        let triggeredSplash = false
 
         for (let i = 0; i < contours.size(); i++) {
           const contour = contours.get(i)
@@ -284,6 +340,12 @@ export default function WaterRipplePage() {
             const centerY = (rect.y + rect.height / 2) * scaleY
             const rippleRadius = Math.min(Math.sqrt(area) / 20, 15)
             waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
+            
+            // Trigger splash sound for significant motion
+            if (area > minMotionArea * 2 && !triggeredSplash) {
+              playSplashSound()
+              triggeredSplash = true
+            }
           }
         }
 
@@ -371,7 +433,7 @@ export default function WaterRipplePage() {
     }
 
     animationRef.current = requestAnimationFrame(detectMotionAndRipple)
-  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity])
+  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity, playSplashSound])
 
   useEffect(() => {
     if (isRunning && cvReady) {
@@ -416,6 +478,15 @@ export default function WaterRipplePage() {
                 <div className="rounded-full bg-cyan-500/20 text-cyan-400 px-3 py-1 text-sm font-medium">
                   Motion Areas: {motionAreas}
                 </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsMuted(!isMuted)}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                  title={isMuted ? "Unmute" : "Mute"}
+                >
+                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </Button>
                 <Button
                   variant="outline"
                   size="icon"
@@ -560,6 +631,39 @@ export default function WaterRipplePage() {
                           className="[&_[role=slider]]:bg-cyan-500"
                         />
                         <p className="text-xs text-slate-500">Visibility of water surface effect</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Audio Settings */}
+                  <div className="border-t border-slate-700 pt-4 mt-4">
+                    <Label className="text-slate-200 font-medium mb-3 block">Audio Settings</Label>
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className="text-slate-300">Splash Volume: {Math.round(splashVolume * 100)}%</Label>
+                        <Slider
+                          value={[splashVolume]}
+                          onValueChange={([v]) => setSplashVolume(v)}
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          className="[&_[role=slider]]:bg-cyan-500"
+                          disabled={isMuted}
+                        />
+                        <p className="text-xs text-slate-500">Volume of water splash sounds</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-300">Ambient Volume: {Math.round(ambientVolume * 100)}%</Label>
+                        <Slider
+                          value={[ambientVolume]}
+                          onValueChange={([v]) => setAmbientVolume(v)}
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          className="[&_[role=slider]]:bg-cyan-500"
+                          disabled={isMuted}
+                        />
+                        <p className="text-xs text-slate-500">Volume of ambient water music</p>
                       </div>
                     </div>
                   </div>
