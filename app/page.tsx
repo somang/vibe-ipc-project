@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Slider } from "@/components/ui/slider"
 import { Waves, CameraOff, Settings2, Volume2, VolumeX } from "lucide-react"
+import * as Tone from "tone"
 
 declare global {
   interface Window {
@@ -23,7 +24,7 @@ class WaterSimulation {
     this.height = height
     this.current = new Float32Array(width * height)
     this.previous = new Float32Array(width * height)
-    this.damping = 0.96
+    this.damping = 0.85
   }
 
   addRipple(x: number, y: number, radius: number, strength: number) {
@@ -103,9 +104,12 @@ export default function WaterRipplePage() {
   const waterSimRef = useRef<WaterSimulation | null>(null)
   const frameCountRef = useRef(0)
   
-  // Audio refs
-  const ambientAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Tone.js audio refs
   const lastSplashTimeRef = useRef<number>(0)
+  const ambientSynthRef = useRef<Tone.PolySynth | null>(null)
+  const splashSynthRef = useRef<Tone.Synth | null>(null)
+  const reverbRef = useRef<Tone.Reverb | null>(null)
+  const audioInitializedRef = useRef(false)
 
   // Load OpenCV.js
   useEffect(() => {
@@ -135,46 +139,94 @@ export default function WaterRipplePage() {
     loadOpenCV()
   }, [])
 
-  // Audio URLs (public domain water sounds)
-  const SPLASH_SOUND_URL = "https://cdn.freesound.org/previews/398/398032_1676145-lq.mp3"
-  const AMBIENT_SOUND_URL = "https://cdn.freesound.org/previews/531/531015_6170507-lq.mp3"
+  // Initialize Tone.js audio
+  const initAudio = useCallback(async () => {
+    if (audioInitializedRef.current) return
+    
+    await Tone.start()
+    
+    // Create reverb for water ambience
+    reverbRef.current = new Tone.Reverb({
+      decay: 4,
+      wet: 0.6
+    }).toDestination()
+    await reverbRef.current.generate()
+    
+    // Ambient pad synth - ethereal water atmosphere
+    ambientSynthRef.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: {
+        attack: 2,
+        decay: 1,
+        sustain: 0.8,
+        release: 3
+      },
+      volume: -20
+    }).connect(reverbRef.current)
+    
+    // Splash synth - water drop sound
+    splashSynthRef.current = new Tone.Synth({
+      oscillator: { type: "sine" },
+      envelope: {
+        attack: 0.005,
+        decay: 0.3,
+        sustain: 0,
+        release: 0.5
+      },
+      volume: -10
+    }).connect(reverbRef.current)
+    
+    audioInitializedRef.current = true
+  }, [])
 
-  // Play water splash sound
+  // Play water splash/drop sound
   const playSplashSound = useCallback(() => {
-    if (isMuted) return
+    if (isMuted || !splashSynthRef.current) return
     
     const now = Date.now()
-    if (now - lastSplashTimeRef.current < 150) return
+    if (now - lastSplashTimeRef.current < 100) return
     lastSplashTimeRef.current = now
     
-    const splash = new Audio(SPLASH_SOUND_URL)
-    splash.volume = splashVolume
-    splash.playbackRate = 0.8 + Math.random() * 0.4
-    splash.play().catch(() => {})
+    // Random high pitch for water drop effect
+    const notes = ["C5", "E5", "G5", "B5", "D6", "F6"]
+    const note = notes[Math.floor(Math.random() * notes.length)]
+    
+    splashSynthRef.current.volume.value = -15 + (splashVolume * 10)
+    splashSynthRef.current.triggerAttackRelease(note, "16n")
   }, [isMuted, splashVolume])
 
-  // Start ambient music
-  const startAmbientMusic = useCallback(() => {
-    if (!ambientAudioRef.current) {
-      ambientAudioRef.current = new Audio(AMBIENT_SOUND_URL)
-      ambientAudioRef.current.loop = true
-    }
-    ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
-    ambientAudioRef.current.play().catch(() => {})
-  }, [isMuted, ambientVolume])
+  // Start ambient drone
+  const startAmbientMusic = useCallback(async () => {
+    await initAudio()
+    
+    if (!ambientSynthRef.current || isMuted) return
+    
+    ambientSynthRef.current.volume.value = -25 + (ambientVolume * 15)
+    
+    // Play ethereal chord - water ambience
+    const chords = [
+      ["C3", "E3", "G3", "B3"],
+      ["A2", "C3", "E3", "G3"],
+      ["F2", "A2", "C3", "E3"]
+    ]
+    const chord = chords[Math.floor(Math.random() * chords.length)]
+    ambientSynthRef.current.triggerAttack(chord)
+  }, [initAudio, isMuted, ambientVolume])
 
   // Stop ambient music
   const stopAmbientMusic = useCallback(() => {
-    if (ambientAudioRef.current) {
-      ambientAudioRef.current.pause()
-      ambientAudioRef.current.currentTime = 0
+    if (ambientSynthRef.current) {
+      ambientSynthRef.current.releaseAll()
     }
   }, [])
 
   // Update ambient volume when settings change
   useEffect(() => {
-    if (ambientAudioRef.current) {
-      ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
+    if (ambientSynthRef.current && !isMuted) {
+      ambientSynthRef.current.volume.value = -25 + (ambientVolume * 15)
+    }
+    if (isMuted && ambientSynthRef.current) {
+      ambientSynthRef.current.releaseAll()
     }
   }, [isMuted, ambientVolume])
 
@@ -362,60 +414,65 @@ export default function WaterRipplePage() {
       // Draw original video
       waterCtx.drawImage(video, 0, 0)
       
-      // Collect active ripple points for halo rendering
-      const halos: { x: number; y: number; val: number }[] = []
+      // Apply subtle water tint
+      waterCtx.save()
+      waterCtx.globalAlpha = waterOpacity * 0.08
+      waterCtx.fillStyle = "#3090d0"
+      waterCtx.fillRect(0, 0, vw, vh)
+      waterCtx.restore()
       
-      for (let sy = 0; sy < simH; sy++) {
+      // Draw water ripple rings - concentric circles like real water
+      waterCtx.save()
+      
+      for (let sy = 0; sy < simH; sy += 2) {
         const row = sy * simW
-        for (let sx = 0; sx < simW; sx++) {
+        for (let sx = 0; sx < simW; sx += 2) {
           const val = curr[row + sx]
-          if (Math.abs(val) > 1.5) {
-            halos.push({ x: sx * stepX, y: sy * stepY, val })
+          const absVal = Math.abs(val)
+          
+          if (absVal > 2) {
+            const px = sx * stepX
+            const py = sy * stepY
+            
+            // Draw multiple concentric rings for water ripple effect
+            const baseRadius = absVal * 3 + 20
+            const alpha = Math.min(absVal / 15, 0.7) * waterOpacity
+            
+            // Outer ring - cyan/blue
+            waterCtx.strokeStyle = `rgba(80, 180, 220, ${alpha * 0.6})`
+            waterCtx.lineWidth = 3
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, baseRadius, 0, Math.PI * 2)
+            waterCtx.stroke()
+            
+            // Middle ring - lighter
+            waterCtx.strokeStyle = `rgba(140, 210, 240, ${alpha * 0.8})`
+            waterCtx.lineWidth = 2
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, baseRadius * 0.65, 0, Math.PI * 2)
+            waterCtx.stroke()
+            
+            // Inner ring - bright highlight
+            waterCtx.strokeStyle = `rgba(200, 235, 255, ${alpha})`
+            waterCtx.lineWidth = 2
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, baseRadius * 0.35, 0, Math.PI * 2)
+            waterCtx.stroke()
+            
+            // Center highlight spot
+            if (val > 0) {
+              const grad = waterCtx.createRadialGradient(px, py, 0, px, py, baseRadius * 0.25)
+              grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.5})`)
+              grad.addColorStop(1, `rgba(180, 220, 255, 0)`)
+              waterCtx.fillStyle = grad
+              waterCtx.beginPath()
+              waterCtx.arc(px, py, baseRadius * 0.25, 0, Math.PI * 2)
+              waterCtx.fill()
+            }
           }
         }
       }
       
-      // Draw halo effects - bright glowing rings
-      waterCtx.save()
-      waterCtx.globalCompositeOperation = "screen"
-      
-      for (const halo of halos) {
-        const absVal = Math.abs(halo.val)
-        const radius = Math.min(absVal * 1.5 + 10, 50)
-        const alpha = Math.min(absVal / 12, 1) * waterOpacity
-        
-        // Outer glow
-        const gradient = waterCtx.createRadialGradient(
-          halo.x, halo.y, radius * 0.2,
-          halo.x, halo.y, radius
-        )
-        
-        if (halo.val > 0) {
-          // Bright cyan/white for peaks
-          gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.9})`)
-          gradient.addColorStop(0.3, `rgba(150, 220, 255, ${alpha * 0.7})`)
-          gradient.addColorStop(0.6, `rgba(80, 180, 255, ${alpha * 0.4})`)
-          gradient.addColorStop(1, `rgba(40, 100, 200, 0)`)
-        } else {
-          // Darker blue for troughs
-          gradient.addColorStop(0, `rgba(100, 180, 255, ${alpha * 0.5})`)
-          gradient.addColorStop(0.5, `rgba(50, 120, 200, ${alpha * 0.3})`)
-          gradient.addColorStop(1, `rgba(30, 80, 150, 0)`)
-        }
-        
-        waterCtx.fillStyle = gradient
-        waterCtx.beginPath()
-        waterCtx.arc(halo.x, halo.y, radius, 0, Math.PI * 2)
-        waterCtx.fill()
-      }
-      
-      waterCtx.restore()
-      
-      // Add light blue tint overlay
-      waterCtx.save()
-      waterCtx.globalAlpha = waterOpacity * 0.06
-      waterCtx.fillStyle = "#60a0ff"
-      waterCtx.fillRect(0, 0, vw, vh)
       waterCtx.restore()
     }
 
@@ -436,6 +493,16 @@ export default function WaterRipplePage() {
   useEffect(() => {
     return () => {
       stopCamera()
+      // Cleanup Tone.js
+      if (ambientSynthRef.current) {
+        ambientSynthRef.current.dispose()
+      }
+      if (splashSynthRef.current) {
+        splashSynthRef.current.dispose()
+      }
+      if (reverbRef.current) {
+        reverbRef.current.dispose()
+      }
     }
   }, [stopCamera])
 
