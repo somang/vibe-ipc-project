@@ -63,6 +63,13 @@ export default function HandDetectionPage() {
   }, [])
 
   const startCamera = async () => {
+    setError(null)
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError("Camera API is not supported in this browser.")
+      return
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" }
@@ -70,12 +77,22 @@ export default function HandDetectionPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         streamRef.current = stream
-        await videoRef.current.play()
-        setIsRunning(true)
-        setError(null)
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play()
+          setIsRunning(true)
+        }
       }
-    } catch (err) {
-      setError("Camera access denied. Please allow camera permissions.")
+    } catch (err: any) {
+      const name = err?.name ?? ""
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setError("Camera access was denied. Please allow camera permissions in your browser settings and try again.")
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setError("No camera found on this device.")
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        setError("Camera is already in use by another application.")
+      } else {
+        setError(`Could not access camera: ${err?.message ?? "Unknown error"}`)
+      }
       console.error("Camera error:", err)
     }
   }
