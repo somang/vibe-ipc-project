@@ -1,11 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
-import { Label } from "@/components/ui/label"
-import { Camera, CameraOff, Settings2, Waves, Volume2, VolumeX } from "lucide-react"
+import { Waves, CameraOff, Settings2, Volume2, VolumeX } from "lucide-react"
 
 declare global {
   interface Window {
@@ -453,235 +450,168 @@ export default function WaterRipplePage() {
   }, [stopCamera])
 
   return (
-    <main className="min-h-screen bg-slate-950 p-4 md:p-8">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight text-white flex items-center justify-center gap-2">
-            <Waves className="h-8 w-8 text-cyan-400" />
-            Interactive Water Ripples
-          </h1>
-          <p className="text-slate-400">
-            Move in front of the camera to create realistic water ripple effects
-          </p>
-        </div>
+    <main className="fixed inset-0 bg-black overflow-hidden">
+      {/* Fullscreen camera view */}
+      <div className="relative w-full h-full">
+        <video
+          ref={videoRef}
+          className="absolute inset-0 h-full w-full object-cover"
+          playsInline
+          muted
+          style={{ display: "none" }}
+        />
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ display: "none" }}
+        />
+        <canvas
+          ref={waterCanvasRef}
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ display: isRunning ? "block" : "none", transform: "scaleX(-1)" }}
+        />
+        
+        {/* Water surface overlay effect */}
+        {isRunning && (
+          <div 
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: "linear-gradient(180deg, rgba(100, 200, 255, 0.05) 0%, rgba(50, 150, 255, 0.1) 100%)",
+              mixBlendMode: "overlay"
+            }}
+          />
+        )}
 
-        <Card className="bg-slate-900 border-slate-800">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-white">Camera Feed</CardTitle>
-                <CardDescription className="text-slate-400">
-                  {cvReady ? "OpenCV.js loaded - Ready to detect motion" : "Loading OpenCV.js..."}
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="rounded-full bg-cyan-500/20 text-cyan-400 px-3 py-1 text-sm font-medium">
-                  Motion Areas: {motionAreas}
+        {/* Start screen */}
+        {!isRunning && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/90">
+            <button
+              onClick={startCamera}
+              disabled={!cvReady}
+              className="group flex flex-col items-center gap-4 p-8 rounded-2xl transition-all hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div className="relative">
+                <Waves className="h-20 w-20 text-cyan-500/60 group-hover:text-cyan-400 transition-colors" />
+                <div className="absolute inset-0 animate-ping opacity-20">
+                  <Waves className="h-20 w-20 text-cyan-400" />
                 </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setIsMuted(!isMuted)}
-                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
-                  title={isMuted ? "Unmute" : "Mute"}
-                >
-                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
-                >
-                  <Settings2 className="h-4 w-4" />
-                </Button>
               </div>
+              <span className="text-white/60 group-hover:text-white/80 text-sm transition-colors">
+                {cvReady ? "Tap to start" : "Loading..."}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Error message */}
+        {error && (
+          <div className="absolute top-4 left-4 right-4 z-20">
+            <div className="rounded-lg bg-red-500/20 backdrop-blur-sm border border-red-500/30 p-3 text-red-300 text-sm">
+              {error}
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-4 text-red-400 text-sm">
-                {error}
-              </div>
-            )}
+          </div>
+        )}
 
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-slate-800 border border-slate-700">
-              <video
-                ref={videoRef}
-                className="absolute inset-0 h-full w-full object-cover"
-                playsInline
-                muted
-                style={{ display: "none" }}
-              />
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{ display: "none" }}
-              />
-              <canvas
-                ref={waterCanvasRef}
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{ display: isRunning ? "block" : "none", transform: "scaleX(-1)" }}
-              />
-              {!isRunning && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-slate-800 to-slate-900">
-                  <div className="text-center space-y-3">
-                    <div className="relative">
-                      <Waves className="h-16 w-16 mx-auto text-cyan-500/50" />
-                      <div className="absolute inset-0 h-16 w-16 mx-auto animate-ping opacity-20">
-                        <Waves className="h-16 w-16 text-cyan-400" />
-                      </div>
-                    </div>
-                    <p className="text-slate-400">
-                      {cvReady ? "Click Start to begin the water simulation" : "Loading OpenCV.js..."}
-                    </p>
-                  </div>
-                </div>
-              )}
-              
-              {/* Water surface overlay effect */}
-              {isRunning && (
-                <div 
-                  className="absolute inset-0 pointer-events-none"
-                  style={{
-                    background: "linear-gradient(180deg, rgba(100, 200, 255, 0.05) 0%, rgba(50, 150, 255, 0.1) 100%)",
-                    mixBlendMode: "overlay"
-                  }}
+        {/* Minimal floating controls */}
+        {isRunning && (
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2">
+            <button
+              onClick={() => setIsMuted(!isMuted)}
+              className="p-3 rounded-full bg-black/30 backdrop-blur-sm text-white/50 hover:text-white/80 hover:bg-black/50 transition-all"
+              title={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </button>
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="p-3 rounded-full bg-black/30 backdrop-blur-sm text-white/50 hover:text-white/80 hover:bg-black/50 transition-all"
+            >
+              <Settings2 className="h-5 w-5" />
+            </button>
+            <button
+              onClick={stopCamera}
+              className="p-3 rounded-full bg-black/30 backdrop-blur-sm text-white/50 hover:text-red-400 hover:bg-black/50 transition-all"
+            >
+              <CameraOff className="h-5 w-5" />
+            </button>
+          </div>
+        )}
+
+        {/* Settings panel */}
+        {showSettings && (
+          <div className="absolute top-4 right-4 z-20 w-80 max-h-[calc(100vh-2rem)] overflow-y-auto">
+            <div className="rounded-xl bg-black/60 backdrop-blur-md border border-white/10 p-4 space-y-4">
+              <div className="space-y-3">
+                <label className="text-white/60 text-xs uppercase tracking-wide">Motion Threshold: {motionThreshold}</label>
+                <Slider
+                  value={[motionThreshold]}
+                  onValueChange={([v]) => setMotionThreshold(v)}
+                  min={5}
+                  max={100}
+                  step={1}
+                  className="[&_[role=slider]]:bg-cyan-500/80"
                 />
-              )}
+              </div>
+              <div className="space-y-3">
+                <label className="text-white/60 text-xs uppercase tracking-wide">Min Motion Area: {minMotionArea}px</label>
+                <Slider
+                  value={[minMotionArea]}
+                  onValueChange={([v]) => setMinMotionArea(v)}
+                  min={100}
+                  max={5000}
+                  step={100}
+                  className="[&_[role=slider]]:bg-cyan-500/80"
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="text-white/60 text-xs uppercase tracking-wide">Ripple Strength: {rippleStrength}</label>
+                <Slider
+                  value={[rippleStrength]}
+                  onValueChange={([v]) => setRippleStrength(v)}
+                  min={50}
+                  max={300}
+                  step={10}
+                  className="[&_[role=slider]]:bg-cyan-500/80"
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="text-white/60 text-xs uppercase tracking-wide">Water Opacity: {Math.round(waterOpacity * 100)}%</label>
+                <Slider
+                  value={[waterOpacity]}
+                  onValueChange={([v]) => setWaterOpacity(v)}
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  className="[&_[role=slider]]:bg-cyan-500/80"
+                />
+              </div>
+              <div className="border-t border-white/10 pt-4 space-y-3">
+                <label className="text-white/60 text-xs uppercase tracking-wide">Splash Volume: {Math.round(splashVolume * 100)}%</label>
+                <Slider
+                  value={[splashVolume]}
+                  onValueChange={([v]) => setSplashVolume(v)}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="[&_[role=slider]]:bg-cyan-500/80"
+                  disabled={isMuted}
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="text-white/60 text-xs uppercase tracking-wide">Ambient Volume: {Math.round(ambientVolume * 100)}%</label>
+                <Slider
+                  value={[ambientVolume]}
+                  onValueChange={([v]) => setAmbientVolume(v)}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="[&_[role=slider]]:bg-cyan-500/80"
+                  disabled={isMuted}
+                />
+              </div>
             </div>
-
-            <div className="flex justify-center gap-4">
-              <Button
-                onClick={startCamera}
-                disabled={!cvReady || isRunning}
-                className="gap-2 bg-cyan-600 hover:bg-cyan-700 text-white"
-              >
-                <Camera className="h-4 w-4" />
-                Start Water Effect
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={stopCamera}
-                disabled={!isRunning}
-                className="gap-2"
-              >
-                <CameraOff className="h-4 w-4" />
-                Stop
-              </Button>
-            </div>
-
-            {showSettings && (
-              <Card className="bg-slate-800 border-slate-700">
-                <CardHeader>
-                  <CardTitle className="text-lg text-white">Water & Motion Settings</CardTitle>
-                  <CardDescription className="text-slate-400">
-                    Adjust sensitivity and visual effects
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="grid gap-6 md:grid-cols-2">
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Motion Threshold: {motionThreshold}</Label>
-                        <Slider
-                          value={[motionThreshold]}
-                          onValueChange={([v]) => setMotionThreshold(v)}
-                          min={5}
-                          max={100}
-                          step={1}
-                          className="[&_[role=slider]]:bg-cyan-500"
-                        />
-                        <p className="text-xs text-slate-500">Lower = more sensitive to motion</p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Min Motion Area: {minMotionArea}px²</Label>
-                        <Slider
-                          value={[minMotionArea]}
-                          onValueChange={([v]) => setMinMotionArea(v)}
-                          min={100}
-                          max={5000}
-                          step={100}
-                          className="[&_[role=slider]]:bg-cyan-500"
-                        />
-                        <p className="text-xs text-slate-500">Filter out small movements/noise</p>
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Ripple Strength: {rippleStrength}</Label>
-                        <Slider
-                          value={[rippleStrength]}
-                          onValueChange={([v]) => setRippleStrength(v)}
-                          min={50}
-                          max={300}
-                          step={10}
-                          className="[&_[role=slider]]:bg-cyan-500"
-                        />
-                        <p className="text-xs text-slate-500">Intensity of water displacement</p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Water Opacity: {Math.round(waterOpacity * 100)}%</Label>
-                        <Slider
-                          value={[waterOpacity]}
-                          onValueChange={([v]) => setWaterOpacity(v)}
-                          min={0.1}
-                          max={1}
-                          step={0.05}
-                          className="[&_[role=slider]]:bg-cyan-500"
-                        />
-                        <p className="text-xs text-slate-500">Visibility of water surface effect</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Audio Settings */}
-                  <div className="border-t border-slate-700 pt-4 mt-4">
-                    <Label className="text-slate-200 font-medium mb-3 block">Audio Settings</Label>
-                    <div className="grid gap-6 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Splash Volume: {Math.round(splashVolume * 100)}%</Label>
-                        <Slider
-                          value={[splashVolume]}
-                          onValueChange={([v]) => setSplashVolume(v)}
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          className="[&_[role=slider]]:bg-cyan-500"
-                          disabled={isMuted}
-                        />
-                        <p className="text-xs text-slate-500">Volume of water splash sounds</p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-slate-300">Ambient Volume: {Math.round(ambientVolume * 100)}%</Label>
-                        <Slider
-                          value={[ambientVolume]}
-                          onValueChange={([v]) => setAmbientVolume(v)}
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          className="[&_[role=slider]]:bg-cyan-500"
-                          disabled={isMuted}
-                        />
-                        <p className="text-xs text-slate-500">Volume of ambient water music</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            <div className="rounded-lg bg-slate-800/50 border border-slate-700 p-4 text-sm text-slate-400">
-              <p className="font-medium mb-2 text-slate-300">How it works:</p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>Motion detection tracks movement between video frames</li>
-                <li>Moving body parts (hands, head, arms) create ripples in the water</li>
-                <li>The water simulation uses wave propagation physics</li>
-                <li>Adjust settings for different lighting conditions and sensitivity</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        )}
       </div>
     </main>
   )
