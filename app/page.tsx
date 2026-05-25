@@ -24,7 +24,7 @@ class WaterSimulation {
     this.height = height
     this.current = new Float32Array(width * height)
     this.previous = new Float32Array(width * height)
-    this.damping = 0.96
+    this.damping = 0.85
   }
 
   addRipple(x: number, y: number, radius: number, strength: number) {
@@ -414,45 +414,40 @@ export default function WaterRipplePage() {
       // Draw original video
       waterCtx.drawImage(video, 0, 0)
       
-      // Collect active ripple points for halo rendering
+      // Collect active ripple points for halo rendering (higher threshold)
       const halos: { x: number; y: number; val: number }[] = []
       
       for (let sy = 0; sy < simH; sy++) {
         const row = sy * simW
         for (let sx = 0; sx < simW; sx++) {
           const val = curr[row + sx]
-          if (Math.abs(val) > 1.5) {
+          if (Math.abs(val) > 3) {
             halos.push({ x: sx * stepX, y: sy * stepY, val })
           }
         }
       }
       
-      // Draw halo effects - bright glowing rings
+      // Draw halo effects - smaller, faster fading
       waterCtx.save()
       waterCtx.globalCompositeOperation = "screen"
       
       for (const halo of halos) {
         const absVal = Math.abs(halo.val)
-        const radius = Math.min(absVal * 1.5 + 10, 50)
-        const alpha = Math.min(absVal / 12, 1) * waterOpacity
+        const radius = Math.min(absVal * 0.8 + 5, 30)
+        const alpha = Math.min(absVal / 20, 0.8) * waterOpacity
         
-        // Outer glow
         const gradient = waterCtx.createRadialGradient(
-          halo.x, halo.y, radius * 0.2,
+          halo.x, halo.y, 0,
           halo.x, halo.y, radius
         )
         
         if (halo.val > 0) {
-          // Bright cyan/white for peaks
-          gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.9})`)
-          gradient.addColorStop(0.3, `rgba(150, 220, 255, ${alpha * 0.7})`)
-          gradient.addColorStop(0.6, `rgba(80, 180, 255, ${alpha * 0.4})`)
-          gradient.addColorStop(1, `rgba(40, 100, 200, 0)`)
+          gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.8})`)
+          gradient.addColorStop(0.4, `rgba(150, 220, 255, ${alpha * 0.4})`)
+          gradient.addColorStop(1, `rgba(80, 180, 255, 0)`)
         } else {
-          // Darker blue for troughs
-          gradient.addColorStop(0, `rgba(100, 180, 255, ${alpha * 0.5})`)
-          gradient.addColorStop(0.5, `rgba(50, 120, 200, ${alpha * 0.3})`)
-          gradient.addColorStop(1, `rgba(30, 80, 150, 0)`)
+          gradient.addColorStop(0, `rgba(100, 180, 255, ${alpha * 0.4})`)
+          gradient.addColorStop(1, `rgba(50, 120, 200, 0)`)
         }
         
         waterCtx.fillStyle = gradient
