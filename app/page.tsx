@@ -362,110 +362,60 @@ export default function WaterRipplePage() {
       // Draw original video
       waterCtx.drawImage(video, 0, 0)
       
-      // Get image data for pixel manipulation (more visible effect)
-      const imageData = waterCtx.getImageData(0, 0, vw, vh)
-      const data = imageData.data
+      // Collect active ripple points for halo rendering
+      const halos: { x: number; y: number; val: number }[] = []
       
-      // Apply displacement and color shift based on water height
-      for (let sy = 1; sy < simH - 1; sy++) {
+      for (let sy = 0; sy < simH; sy++) {
         const row = sy * simW
-        for (let sx = 1; sx < simW - 1; sx++) {
-          const idx = row + sx
-          const val = curr[idx]
-          
-          if (Math.abs(val) > 0.3) {
-            // Calculate gradient (for displacement direction)
-            const dx = (curr[idx + 1] - curr[idx - 1]) * 3
-            const dy = (curr[idx + simW] - curr[idx - simW]) * 3
-            
-            const px = Math.floor(sx * stepX)
-            const py = Math.floor(sy * stepY)
-            const pw = Math.ceil(stepX)
-            const ph = Math.ceil(stepY)
-            
-            // Source position with displacement
-            const srcX = Math.max(0, Math.min(vw - 1, Math.floor(px + dx)))
-            const srcY = Math.max(0, Math.min(vh - 1, Math.floor(py + dy)))
-            
-            // Apply to block of pixels
-            for (let y = py; y < py + ph && y < vh; y++) {
-              for (let x = px; x < px + pw && x < vw; x++) {
-                const dstIdx = (y * vw + x) * 4
-                const srcIdx = (srcY * vw + srcX) * 4
-                
-                // Displacement + color tint based on wave height
-                const intensity = Math.min(Math.abs(val) * waterOpacity * 0.15, 1)
-                const highlight = val > 0 ? val * waterOpacity * 2 : 0
-                
-                data[dstIdx] = data[srcIdx] * (1 - intensity * 0.1) + highlight * 0.3
-                data[dstIdx + 1] = data[srcIdx + 1] * (1 - intensity * 0.05) + highlight * 0.5
-                data[dstIdx + 2] = Math.min(255, data[srcIdx + 2] + intensity * 60 + highlight)
-                data[dstIdx + 3] = 255
-              }
-            }
+        for (let sx = 0; sx < simW; sx++) {
+          const val = curr[row + sx]
+          if (Math.abs(val) > 1.5) {
+            halos.push({ x: sx * stepX, y: sy * stepY, val })
           }
         }
       }
       
-      waterCtx.putImageData(imageData, 0, 0)
-      
-      // Draw bright ripple rings overlay
+      // Draw halo effects - bright glowing rings
       waterCtx.save()
       waterCtx.globalCompositeOperation = "screen"
       
-      for (let sy = 0; sy < simH; sy++) {
-        for (let sx = 0; sx < simW; sx++) {
-          const val = curr[sy * simW + sx]
-          const absVal = Math.abs(val)
-          
-          if (absVal > 1) {
-            const px = sx * stepX
-            const py = sy * stepY
-            
-            // Draw glowing dot/ring effect
-            const radius = Math.min(absVal * 0.8, 15)
-            const alpha = Math.min(absVal / 15, 0.8) * waterOpacity
-            
-            const gradient = waterCtx.createRadialGradient(px, py, 0, px, py, radius * 2)
-            if (val > 0) {
-              gradient.addColorStop(0, `rgba(220, 240, 255, ${alpha})`)
-              gradient.addColorStop(0.5, `rgba(100, 180, 255, ${alpha * 0.5})`)
-              gradient.addColorStop(1, `rgba(50, 100, 200, 0)`)
-            } else {
-              gradient.addColorStop(0, `rgba(30, 80, 150, ${alpha * 0.6})`)
-              gradient.addColorStop(1, `rgba(20, 50, 100, 0)`)
-            }
-            
-            waterCtx.fillStyle = gradient
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, radius * 2, 0, Math.PI * 2)
-            waterCtx.fill()
-          }
+      for (const halo of halos) {
+        const absVal = Math.abs(halo.val)
+        const radius = Math.min(absVal * 1.5 + 10, 50)
+        const alpha = Math.min(absVal / 12, 1) * waterOpacity
+        
+        // Outer glow
+        const gradient = waterCtx.createRadialGradient(
+          halo.x, halo.y, radius * 0.2,
+          halo.x, halo.y, radius
+        )
+        
+        if (halo.val > 0) {
+          // Bright cyan/white for peaks
+          gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.9})`)
+          gradient.addColorStop(0.3, `rgba(150, 220, 255, ${alpha * 0.7})`)
+          gradient.addColorStop(0.6, `rgba(80, 180, 255, ${alpha * 0.4})`)
+          gradient.addColorStop(1, `rgba(40, 100, 200, 0)`)
+        } else {
+          // Darker blue for troughs
+          gradient.addColorStop(0, `rgba(100, 180, 255, ${alpha * 0.5})`)
+          gradient.addColorStop(0.5, `rgba(50, 120, 200, ${alpha * 0.3})`)
+          gradient.addColorStop(1, `rgba(30, 80, 150, 0)`)
         }
+        
+        waterCtx.fillStyle = gradient
+        waterCtx.beginPath()
+        waterCtx.arc(halo.x, halo.y, radius, 0, Math.PI * 2)
+        waterCtx.fill()
       }
       
       waterCtx.restore()
       
-      // Add subtle water surface lines
+      // Add light blue tint overlay
       waterCtx.save()
-      waterCtx.strokeStyle = "rgba(150, 200, 255, 0.15)"
-      waterCtx.lineWidth = 1
-      
-      for (let sy = 0; sy < simH; sy += 4) {
-        waterCtx.beginPath()
-        for (let sx = 0; sx < simW; sx++) {
-          const val = curr[sy * simW + sx]
-          const px = sx * stepX
-          const py = sy * stepY + val * 0.5
-          if (sx === 0) {
-            waterCtx.moveTo(px, py)
-          } else {
-            waterCtx.lineTo(px, py)
-          }
-        }
-        waterCtx.stroke()
-      }
-      
+      waterCtx.globalAlpha = waterOpacity * 0.06
+      waterCtx.fillStyle = "#60a0ff"
+      waterCtx.fillRect(0, 0, vw, vh)
       waterCtx.restore()
     }
 
