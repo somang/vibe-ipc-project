@@ -414,55 +414,65 @@ export default function WaterRipplePage() {
       // Draw original video
       waterCtx.drawImage(video, 0, 0)
       
-      // Collect active ripple points for halo rendering (higher threshold)
-      const halos: { x: number; y: number; val: number }[] = []
+      // Apply subtle water tint
+      waterCtx.save()
+      waterCtx.globalAlpha = waterOpacity * 0.08
+      waterCtx.fillStyle = "#3090d0"
+      waterCtx.fillRect(0, 0, vw, vh)
+      waterCtx.restore()
       
-      for (let sy = 0; sy < simH; sy++) {
+      // Draw water ripple rings - concentric circles like real water
+      waterCtx.save()
+      
+      for (let sy = 0; sy < simH; sy += 2) {
         const row = sy * simW
-        for (let sx = 0; sx < simW; sx++) {
+        for (let sx = 0; sx < simW; sx += 2) {
           const val = curr[row + sx]
-          if (Math.abs(val) > 3) {
-            halos.push({ x: sx * stepX, y: sy * stepY, val })
+          const absVal = Math.abs(val)
+          
+          if (absVal > 2) {
+            const px = sx * stepX
+            const py = sy * stepY
+            
+            // Draw multiple concentric rings for water ripple effect
+            const baseRadius = absVal * 3 + 20
+            const alpha = Math.min(absVal / 15, 0.7) * waterOpacity
+            
+            // Outer ring - cyan/blue
+            waterCtx.strokeStyle = `rgba(80, 180, 220, ${alpha * 0.6})`
+            waterCtx.lineWidth = 3
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, baseRadius, 0, Math.PI * 2)
+            waterCtx.stroke()
+            
+            // Middle ring - lighter
+            waterCtx.strokeStyle = `rgba(140, 210, 240, ${alpha * 0.8})`
+            waterCtx.lineWidth = 2
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, baseRadius * 0.65, 0, Math.PI * 2)
+            waterCtx.stroke()
+            
+            // Inner ring - bright highlight
+            waterCtx.strokeStyle = `rgba(200, 235, 255, ${alpha})`
+            waterCtx.lineWidth = 2
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, baseRadius * 0.35, 0, Math.PI * 2)
+            waterCtx.stroke()
+            
+            // Center highlight spot
+            if (val > 0) {
+              const grad = waterCtx.createRadialGradient(px, py, 0, px, py, baseRadius * 0.25)
+              grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.5})`)
+              grad.addColorStop(1, `rgba(180, 220, 255, 0)`)
+              waterCtx.fillStyle = grad
+              waterCtx.beginPath()
+              waterCtx.arc(px, py, baseRadius * 0.25, 0, Math.PI * 2)
+              waterCtx.fill()
+            }
           }
         }
       }
       
-      // Draw halo effects - smaller, faster fading
-      waterCtx.save()
-      waterCtx.globalCompositeOperation = "screen"
-      
-      for (const halo of halos) {
-        const absVal = Math.abs(halo.val)
-        const radius = Math.min(absVal * 0.8 + 5, 30)
-        const alpha = Math.min(absVal / 20, 0.8) * waterOpacity
-        
-        const gradient = waterCtx.createRadialGradient(
-          halo.x, halo.y, 0,
-          halo.x, halo.y, radius
-        )
-        
-        if (halo.val > 0) {
-          gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.8})`)
-          gradient.addColorStop(0.4, `rgba(150, 220, 255, ${alpha * 0.4})`)
-          gradient.addColorStop(1, `rgba(80, 180, 255, 0)`)
-        } else {
-          gradient.addColorStop(0, `rgba(100, 180, 255, ${alpha * 0.4})`)
-          gradient.addColorStop(1, `rgba(50, 120, 200, 0)`)
-        }
-        
-        waterCtx.fillStyle = gradient
-        waterCtx.beginPath()
-        waterCtx.arc(halo.x, halo.y, radius, 0, Math.PI * 2)
-        waterCtx.fill()
-      }
-      
-      waterCtx.restore()
-      
-      // Add light blue tint overlay
-      waterCtx.save()
-      waterCtx.globalAlpha = waterOpacity * 0.06
-      waterCtx.fillStyle = "#60a0ff"
-      waterCtx.fillRect(0, 0, vw, vh)
       waterCtx.restore()
     }
 
