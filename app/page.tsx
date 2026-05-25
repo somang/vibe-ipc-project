@@ -98,10 +98,10 @@ export default function WaterRipplePage() {
   const [error, setError] = useState<string | null>(null)
   
   // Motion detection settings
-  const [motionThreshold, setMotionThreshold] = useState(25)
-  const [minMotionArea, setMinMotionArea] = useState(500)
-  const [rippleStrength, setRippleStrength] = useState(150)
-  const [waterOpacity, setWaterOpacity] = useState(0.4)
+  const [motionThreshold, setMotionThreshold] = useState(90)
+  const [minMotionArea, setMinMotionArea] = useState(200)
+  const [rippleStrength, setRippleStrength] = useState(50)
+  const [waterOpacity, setWaterOpacity] = useState(0.95)
   
   // Audio settings
   const [isMuted, setIsMuted] = useState(false)
@@ -151,6 +151,7 @@ export default function WaterRipplePage() {
 
   // Play water splash sound
   const playSplashSound = useCallback(() => {
+    console.log("[v0] playSplashSound called, isMuted:", isMuted)
     if (isMuted) return
     
     const now = Date.now()
@@ -158,20 +159,31 @@ export default function WaterRipplePage() {
     if (now - lastSplashTimeRef.current < 150) return
     lastSplashTimeRef.current = now
     
+    console.log("[v0] Creating splash audio with volume:", splashVolume)
     const splash = new Audio(SPLASH_SOUND_URL)
     splash.volume = splashVolume
     splash.playbackRate = 0.8 + Math.random() * 0.4 // Slight variation
-    splash.play().catch(() => {}) // Ignore autoplay errors
+    splash.play().then(() => {
+      console.log("[v0] Splash audio playing")
+    }).catch((err) => {
+      console.log("[v0] Splash audio error:", err)
+    })
   }, [isMuted, splashVolume])
 
   // Start ambient music
   const startAmbientMusic = useCallback(() => {
+    console.log("[v0] startAmbientMusic called, isMuted:", isMuted, "ambientVolume:", ambientVolume)
     if (!ambientAudioRef.current) {
       ambientAudioRef.current = new Audio(AMBIENT_SOUND_URL)
       ambientAudioRef.current.loop = true
+      console.log("[v0] Created new ambient audio element")
     }
     ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
-    ambientAudioRef.current.play().catch(() => {})
+    ambientAudioRef.current.play().then(() => {
+      console.log("[v0] Ambient audio playing")
+    }).catch((err) => {
+      console.log("[v0] Ambient audio error:", err)
+    })
   }, [isMuted, ambientVolume])
 
   // Stop ambient music
