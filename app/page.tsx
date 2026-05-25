@@ -63,45 +63,35 @@ export default function HandDetectionPage() {
   }, [])
 
   const startCamera = async () => {
-    console.log("[v0] startCamera called")
     setError(null)
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      console.log("[v0] Camera API not supported")
       setError("Camera API is not supported in this browser.")
       return
     }
 
     try {
-      console.log("[v0] Requesting camera access...")
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" }
       })
-      console.log("[v0] Camera stream acquired:", stream)
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         streamRef.current = stream
-        console.log("[v0] Stream assigned to video element")
         
         videoRef.current.onloadedmetadata = () => {
-          console.log("[v0] Video metadata loaded, playing...")
           videoRef.current?.play().then(() => {
-            console.log("[v0] Video playing, starting detection")
             setIsRunning(true)
           }).catch((err) => {
-            console.error("[v0] Error playing video:", err)
             setError(`Error starting playback: ${err?.message}`)
           })
         }
       }
     } catch (err: any) {
-      console.error("[v0] Camera error:", err)
       const name = err?.name ?? ""
-      console.log("[v0] Error name:", name)
       
       if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        setError("Camera access was denied. Please allow camera permissions in your browser settings and try again.")
+        setError("Camera access was denied. If you're viewing this in an embedded preview, please open the app in a new browser tab (click the external link icon) to allow camera permissions.")
       } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
         setError("No camera found on this device.")
       } else if (name === "NotReadableError" || name === "TrackStartError") {
