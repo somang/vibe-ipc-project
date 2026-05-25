@@ -211,7 +211,11 @@ export default function WaterRipplePage() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" }
+        video: { 
+          width: { ideal: 1920 }, 
+          height: { ideal: 1080 }, 
+          facingMode: "user"
+        }
       })
       
       if (videoRef.current) {
