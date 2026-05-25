@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-// Water ripple simulation class
+// Optimized Water ripple simulation class
 class WaterSimulation {
   width: number
   height: number
@@ -23,21 +23,31 @@ class WaterSimulation {
     this.height = height
     this.current = new Float32Array(width * height)
     this.previous = new Float32Array(width * height)
-    this.damping = 0.97
+    this.damping = 0.96
   }
 
   addRipple(x: number, y: number, radius: number, strength: number) {
-    const radiusSq = radius * radius
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const px = Math.floor(x + dx)
-        const py = Math.floor(y + dy)
-        if (px >= 0 && px < this.width && py >= 0 && py < this.height) {
-          const distSq = dx * dx + dy * dy
-          if (distSq < radiusSq) {
-            const factor = 1 - Math.sqrt(distSq) / radius
-            this.current[py * this.width + px] += strength * factor
-          }
+    const w = this.width
+    const h = this.height
+    const r = Math.ceil(radius)
+    const r2 = radius * radius
+    const cx = Math.floor(x)
+    const cy = Math.floor(y)
+    
+    const minY = Math.max(0, cy - r)
+    const maxY = Math.min(h - 1, cy + r)
+    const minX = Math.max(0, cx - r)
+    const maxX = Math.min(w - 1, cx + r)
+    
+    for (let py = minY; py <= maxY; py++) {
+      const dy = py - cy
+      const dy2 = dy * dy
+      const rowIdx = py * w
+      for (let px = minX; px <= maxX; px++) {
+        const dx = px - cx
+        const d2 = dx * dx + dy2
+        if (d2 < r2) {
+          this.current[rowIdx + px] += strength * (1 - Math.sqrt(d2) / radius)
         }
       }
     }
@@ -46,44 +56,23 @@ class WaterSimulation {
   update() {
     const w = this.width
     const h = this.height
+    const curr = this.current
+    const prev = this.previous
+    const damp = this.damping
 
     for (let y = 1; y < h - 1; y++) {
+      const row = y * w
+      const rowUp = row - w
+      const rowDown = row + w
       for (let x = 1; x < w - 1; x++) {
-        const idx = y * w + x
-        // Wave propagation formula
-        this.current[idx] = (
-          this.previous[idx - 1] +
-          this.previous[idx + 1] +
-          this.previous[idx - w] +
-          this.previous[idx + w]
-        ) / 2 - this.current[idx]
-        
-        // Apply damping
-        this.current[idx] *= this.damping
+        const idx = row + x
+        curr[idx] = ((prev[idx - 1] + prev[idx + 1] + prev[rowUp + x] + prev[rowDown + x]) * 0.5 - curr[idx]) * damp
       }
     }
 
-    // Swap buffers
-    const temp = this.previous
-    this.previous = this.current
-    this.current = temp
-  }
-
-  getDisplacement(x: number, y: number): { dx: number; dy: number } {
-    if (x <= 0 || x >= this.width - 1 || y <= 0 || y >= this.height - 1) {
-      return { dx: 0, dy: 0 }
-    }
-    const idx = Math.floor(y) * this.width + Math.floor(x)
-    const dx = (this.current[idx - 1] - this.current[idx + 1]) * 8
-    const dy = (this.current[idx - this.width] - this.current[idx + this.width]) * 8
-    return { dx, dy }
-  }
-
-  resize(width: number, height: number) {
-    this.width = width
-    this.height = height
-    this.current = new Float32Array(width * height)
-    this.previous = new Float32Array(width * height)
+    // Swap
+    this.previous = curr
+    this.current = prev
   }
 }
 
@@ -112,6 +101,7 @@ export default function WaterRipplePage() {
   const streamRef = useRef<MediaStream | null>(null)
   const prevFrameRef = useRef<any>(null)
   const waterSimRef = useRef<WaterSimulation | null>(null)
+  const frameCountRef = useRef(0)
   
   // Audio refs
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -151,39 +141,26 @@ export default function WaterRipplePage() {
 
   // Play water splash sound
   const playSplashSound = useCallback(() => {
-    console.log("[v0] playSplashSound called, isMuted:", isMuted)
     if (isMuted) return
     
     const now = Date.now()
-    // Throttle splash sounds to avoid overlap (min 150ms between splashes)
     if (now - lastSplashTimeRef.current < 150) return
     lastSplashTimeRef.current = now
     
-    console.log("[v0] Creating splash audio with volume:", splashVolume)
     const splash = new Audio(SPLASH_SOUND_URL)
     splash.volume = splashVolume
-    splash.playbackRate = 0.8 + Math.random() * 0.4 // Slight variation
-    splash.play().then(() => {
-      console.log("[v0] Splash audio playing")
-    }).catch((err) => {
-      console.log("[v0] Splash audio error:", err)
-    })
+    splash.playbackRate = 0.8 + Math.random() * 0.4
+    splash.play().catch(() => {})
   }, [isMuted, splashVolume])
 
   // Start ambient music
   const startAmbientMusic = useCallback(() => {
-    console.log("[v0] startAmbientMusic called, isMuted:", isMuted, "ambientVolume:", ambientVolume)
     if (!ambientAudioRef.current) {
       ambientAudioRef.current = new Audio(AMBIENT_SOUND_URL)
       ambientAudioRef.current.loop = true
-      console.log("[v0] Created new ambient audio element")
     }
     ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
-    ambientAudioRef.current.play().then(() => {
-      console.log("[v0] Ambient audio playing")
-    }).catch((err) => {
-      console.log("[v0] Ambient audio error:", err)
-    })
+    ambientAudioRef.current.play().catch(() => {})
   }, [isMuted, ambientVolume])
 
   // Stop ambient music
@@ -224,10 +201,10 @@ export default function WaterRipplePage() {
         
         videoRef.current.onloadedmetadata = () => {
           videoRef.current?.play().then(() => {
-            // Initialize water simulation
+            // Initialize water simulation at low resolution for performance
             const w = videoRef.current!.videoWidth
             const h = videoRef.current!.videoHeight
-            waterSimRef.current = new WaterSimulation(Math.floor(w / 4), Math.floor(h / 4))
+            waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
             setIsRunning(true)
             startAmbientMusic()
           }).catch((err) => {
@@ -277,67 +254,63 @@ export default function WaterRipplePage() {
     const video = videoRef.current
     const canvas = canvasRef.current
     const waterCanvas = waterCanvasRef.current
-    const ctx = canvas.getContext("2d")
-    const waterCtx = waterCanvas.getContext("2d")
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })
+    const waterCtx = waterCanvas.getContext("2d", { willReadFrequently: true })
 
     if (!ctx || !waterCtx || video.readyState !== 4) {
       animationRef.current = requestAnimationFrame(detectMotionAndRipple)
       return
     }
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    waterCanvas.width = video.videoWidth
-    waterCanvas.height = video.videoHeight
+    const vw = video.videoWidth
+    const vh = video.videoHeight
+    
+    // Set canvas sizes once
+    if (canvas.width !== vw) {
+      canvas.width = vw
+      canvas.height = vh
+      waterCanvas.width = vw
+      waterCanvas.height = vh
+    }
 
-    // Draw video frame to canvas
+    // Draw video frame
     ctx.drawImage(video, 0, 0)
+    
+    frameCountRef.current++
+    const waterSim = waterSimRef.current
+    
+    // Only do motion detection every 3rd frame for performance
+    if (frameCountRef.current % 3 === 0 && waterSim) {
+      try {
+        const src = cv.imread(canvas)
+        const gray = new cv.Mat()
+        const blurred = new cv.Mat()
+        
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+        cv.GaussianBlur(gray, blurred, new cv.Size(11, 11), 0)
 
-    try {
-      // Read the frame
-      const src = cv.imread(canvas)
-      const gray = new cv.Mat()
-      const blurred = new cv.Mat()
-      
-      // Convert to grayscale
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
-      cv.GaussianBlur(gray, blurred, new cv.Size(21, 21), 0)
+        if (!prevFrameRef.current) {
+          prevFrameRef.current = blurred.clone()
+          src.delete()
+          gray.delete()
+          blurred.delete()
+          animationRef.current = requestAnimationFrame(detectMotionAndRipple)
+          return
+        }
 
-      // Initialize previous frame if needed
-      if (!prevFrameRef.current) {
-        prevFrameRef.current = blurred.clone()
-        src.delete()
-        gray.delete()
-        blurred.delete()
-        animationRef.current = requestAnimationFrame(detectMotionAndRipple)
-        return
-      }
+        const diff = new cv.Mat()
+        cv.absdiff(prevFrameRef.current, blurred, diff)
+        
+        const thresh = new cv.Mat()
+        cv.threshold(diff, thresh, motionThreshold, 255, cv.THRESH_BINARY)
+        
+        const contours = new cv.MatVector()
+        const hierarchy = new cv.Mat()
+        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-      // Compute frame difference
-      const diff = new cv.Mat()
-      cv.absdiff(prevFrameRef.current, blurred, diff)
-      
-      // Threshold the difference
-      const thresh = new cv.Mat()
-      cv.threshold(diff, thresh, motionThreshold, 255, cv.THRESH_BINARY)
-      
-      // Dilate to fill holes
-      const kernel = cv.Mat.ones(5, 5, cv.CV_8U)
-      const dilated = new cv.Mat()
-      cv.dilate(thresh, dilated, kernel, new cv.Point(-1, -1), 2)
-
-      // Find contours
-      const contours = new cv.MatVector()
-      const hierarchy = new cv.Mat()
-      cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-
-      // Process motion areas and create ripples
-      let areaCount = 0
-      const waterSim = waterSimRef.current
-      
-      if (waterSim) {
-        const scaleX = waterSim.width / video.videoWidth
-        const scaleY = waterSim.height / video.videoHeight
+        const scaleX = waterSim.width / vw
+        const scaleY = waterSim.height / vh
+        let areaCount = 0
         let triggeredSplash = false
 
         for (let i = 0; i < contours.size(); i++) {
@@ -347,14 +320,11 @@ export default function WaterRipplePage() {
           if (area > minMotionArea) {
             areaCount++
             const rect = cv.boundingRect(contour)
-            
-            // Add ripple at center of motion
             const centerX = (rect.x + rect.width / 2) * scaleX
             const centerY = (rect.y + rect.height / 2) * scaleY
-            const rippleRadius = Math.min(Math.sqrt(area) / 20, 15)
+            const rippleRadius = Math.min(Math.sqrt(area) / 25, 12)
             waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
             
-            // Trigger splash sound for significant motion
             if (area > minMotionArea * 2 && !triggeredSplash) {
               playSplashSound()
               triggeredSplash = true
@@ -362,87 +332,87 @@ export default function WaterRipplePage() {
           }
         }
 
-        // Update water simulation
-        waterSim.update()
-
-        // Render water effect
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const waterImageData = waterCtx.createImageData(canvas.width, canvas.height)
-        const srcData = imageData.data
-        const dstData = waterImageData.data
-
-        for (let y = 0; y < canvas.height; y++) {
-          for (let x = 0; x < canvas.width; x++) {
-            const simX = x * scaleX
-            const simY = y * scaleY
-            const { dx, dy } = waterSim.getDisplacement(simX, simY)
-            
-            // Get displaced pixel coordinates
-            let srcX = Math.floor(x + dx)
-            let srcY = Math.floor(y + dy)
-            
-            // Clamp to bounds
-            srcX = Math.max(0, Math.min(canvas.width - 1, srcX))
-            srcY = Math.max(0, Math.min(canvas.height - 1, srcY))
-            
-            const srcIdx = (srcY * canvas.width + srcX) * 4
-            const dstIdx = (y * canvas.width + x) * 4
-            
-            // Copy pixel with slight blue tint for water effect
-            const displacement = Math.abs(dx) + Math.abs(dy)
-            const blueTint = Math.min(displacement * 2, 40)
-            
-            dstData[dstIdx] = Math.max(0, srcData[srcIdx] - blueTint * 0.3)
-            dstData[dstIdx + 1] = Math.max(0, srcData[srcIdx + 1] - blueTint * 0.1)
-            dstData[dstIdx + 2] = Math.min(255, srcData[srcIdx + 2] + blueTint)
-            dstData[dstIdx + 3] = 255
-          }
-        }
-
-        waterCtx.putImageData(waterImageData, 0, 0)
-
-        // Draw water surface overlay with caustics
-        waterCtx.globalAlpha = waterOpacity * 0.3
-        waterCtx.fillStyle = "rgba(100, 180, 255, 0.1)"
+        setMotionAreas(areaCount)
         
-        // Draw some caustic-like highlights based on water displacement
-        for (let y = 0; y < canvas.height; y += 8) {
-          for (let x = 0; x < canvas.width; x += 8) {
-            const simX = x * scaleX
-            const simY = y * scaleY
-            const { dx, dy } = waterSim.getDisplacement(simX, simY)
-            const intensity = Math.abs(dx) + Math.abs(dy)
-            
-            if (intensity > 2) {
-              waterCtx.globalAlpha = Math.min(intensity / 20, 0.4) * waterOpacity
-              waterCtx.fillStyle = `rgba(200, 230, 255, ${Math.min(intensity / 15, 0.6)})`
-              waterCtx.fillRect(x - 2, y - 2, 4, 4)
-            }
-          }
-        }
-        
-        waterCtx.globalAlpha = 1
+        prevFrameRef.current.delete()
+        prevFrameRef.current = blurred.clone()
+
+        src.delete()
+        gray.delete()
+        blurred.delete()
+        diff.delete()
+        thresh.delete()
+        contours.delete()
+        hierarchy.delete()
+      } catch (err) {
+        // Silent error handling
       }
+    }
 
-      setMotionAreas(areaCount)
-
-      // Update previous frame
-      prevFrameRef.current.delete()
-      prevFrameRef.current = blurred.clone()
-
-      // Cleanup
-      src.delete()
-      gray.delete()
-      blurred.delete()
-      diff.delete()
-      thresh.delete()
-      kernel.delete()
-      dilated.delete()
-      contours.delete()
-      hierarchy.delete()
-
-    } catch (err) {
-      console.error("Detection error:", err)
+    // Always update water simulation and render
+    if (waterSim) {
+      waterSim.update()
+      
+      // Fast rendering using canvas composite operations
+      const simW = waterSim.width
+      const simH = waterSim.height
+      const curr = waterSim.current
+      
+      // Draw original video
+      waterCtx.drawImage(video, 0, 0)
+      
+      // Create displacement effect using canvas transforms
+      waterCtx.save()
+      waterCtx.globalAlpha = waterOpacity * 0.15
+      waterCtx.globalCompositeOperation = "source-atop"
+      
+      // Draw shifted copies based on water displacement (simplified)
+      const stepX = Math.floor(vw / simW)
+      const stepY = Math.floor(vh / simH)
+      
+      for (let sy = 1; sy < simH - 1; sy += 2) {
+        for (let sx = 1; sx < simW - 1; sx += 2) {
+          const idx = sy * simW + sx
+          const val = curr[idx]
+          if (Math.abs(val) > 0.5) {
+            const px = sx * stepX
+            const py = sy * stepY
+            const displacement = val * 0.1
+            
+            waterCtx.drawImage(
+              canvas,
+              px, py, stepX * 2, stepY * 2,
+              px + displacement, py + displacement, stepX * 2, stepY * 2
+            )
+          }
+        }
+      }
+      
+      waterCtx.restore()
+      
+      // Add water tint overlay
+      waterCtx.save()
+      waterCtx.globalAlpha = waterOpacity * 0.08
+      waterCtx.fillStyle = "#4080ff"
+      waterCtx.fillRect(0, 0, vw, vh)
+      waterCtx.restore()
+      
+      // Draw ripple highlights (sparse)
+      waterCtx.save()
+      waterCtx.globalCompositeOperation = "screen"
+      for (let sy = 0; sy < simH; sy += 3) {
+        for (let sx = 0; sx < simW; sx += 3) {
+          const val = Math.abs(curr[sy * simW + sx])
+          if (val > 3) {
+            const px = sx * stepX
+            const py = sy * stepY
+            const alpha = Math.min(val / 30, 0.5) * waterOpacity
+            waterCtx.fillStyle = `rgba(180, 220, 255, ${alpha})`
+            waterCtx.fillRect(px, py, stepX, stepY)
+          }
+        }
+      }
+      waterCtx.restore()
     }
 
     animationRef.current = requestAnimationFrame(detectMotionAndRipple)
