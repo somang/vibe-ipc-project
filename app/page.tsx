@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Slider } from "@/components/ui/slider"
 import { Waves, CameraOff, Settings2, Volume2, VolumeX } from "lucide-react"
+import * as Tone from "tone"
 
 declare global {
   interface Window {
@@ -103,9 +104,12 @@ export default function WaterRipplePage() {
   const waterSimRef = useRef<WaterSimulation | null>(null)
   const frameCountRef = useRef(0)
   
-  // Audio refs
-  const ambientAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Tone.js audio refs
   const lastSplashTimeRef = useRef<number>(0)
+  const ambientSynthRef = useRef<Tone.PolySynth | null>(null)
+  const splashSynthRef = useRef<Tone.Synth | null>(null)
+  const reverbRef = useRef<Tone.Reverb | null>(null)
+  const audioInitializedRef = useRef(false)
 
   // Load OpenCV.js
   useEffect(() => {
@@ -135,46 +139,94 @@ export default function WaterRipplePage() {
     loadOpenCV()
   }, [])
 
-  // Audio URLs (public domain water sounds)
-  const SPLASH_SOUND_URL = "https://cdn.freesound.org/previews/398/398032_1676145-lq.mp3"
-  const AMBIENT_SOUND_URL = "https://cdn.freesound.org/previews/531/531015_6170507-lq.mp3"
+  // Initialize Tone.js audio
+  const initAudio = useCallback(async () => {
+    if (audioInitializedRef.current) return
+    
+    await Tone.start()
+    
+    // Create reverb for water ambience
+    reverbRef.current = new Tone.Reverb({
+      decay: 4,
+      wet: 0.6
+    }).toDestination()
+    await reverbRef.current.generate()
+    
+    // Ambient pad synth - ethereal water atmosphere
+    ambientSynthRef.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: {
+        attack: 2,
+        decay: 1,
+        sustain: 0.8,
+        release: 3
+      },
+      volume: -20
+    }).connect(reverbRef.current)
+    
+    // Splash synth - water drop sound
+    splashSynthRef.current = new Tone.Synth({
+      oscillator: { type: "sine" },
+      envelope: {
+        attack: 0.005,
+        decay: 0.3,
+        sustain: 0,
+        release: 0.5
+      },
+      volume: -10
+    }).connect(reverbRef.current)
+    
+    audioInitializedRef.current = true
+  }, [])
 
-  // Play water splash sound
+  // Play water splash/drop sound
   const playSplashSound = useCallback(() => {
-    if (isMuted) return
+    if (isMuted || !splashSynthRef.current) return
     
     const now = Date.now()
-    if (now - lastSplashTimeRef.current < 150) return
+    if (now - lastSplashTimeRef.current < 100) return
     lastSplashTimeRef.current = now
     
-    const splash = new Audio(SPLASH_SOUND_URL)
-    splash.volume = splashVolume
-    splash.playbackRate = 0.8 + Math.random() * 0.4
-    splash.play().catch(() => {})
+    // Random high pitch for water drop effect
+    const notes = ["C5", "E5", "G5", "B5", "D6", "F6"]
+    const note = notes[Math.floor(Math.random() * notes.length)]
+    
+    splashSynthRef.current.volume.value = -15 + (splashVolume * 10)
+    splashSynthRef.current.triggerAttackRelease(note, "16n")
   }, [isMuted, splashVolume])
 
-  // Start ambient music
-  const startAmbientMusic = useCallback(() => {
-    if (!ambientAudioRef.current) {
-      ambientAudioRef.current = new Audio(AMBIENT_SOUND_URL)
-      ambientAudioRef.current.loop = true
-    }
-    ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
-    ambientAudioRef.current.play().catch(() => {})
-  }, [isMuted, ambientVolume])
+  // Start ambient drone
+  const startAmbientMusic = useCallback(async () => {
+    await initAudio()
+    
+    if (!ambientSynthRef.current || isMuted) return
+    
+    ambientSynthRef.current.volume.value = -25 + (ambientVolume * 15)
+    
+    // Play ethereal chord - water ambience
+    const chords = [
+      ["C3", "E3", "G3", "B3"],
+      ["A2", "C3", "E3", "G3"],
+      ["F2", "A2", "C3", "E3"]
+    ]
+    const chord = chords[Math.floor(Math.random() * chords.length)]
+    ambientSynthRef.current.triggerAttack(chord)
+  }, [initAudio, isMuted, ambientVolume])
 
   // Stop ambient music
   const stopAmbientMusic = useCallback(() => {
-    if (ambientAudioRef.current) {
-      ambientAudioRef.current.pause()
-      ambientAudioRef.current.currentTime = 0
+    if (ambientSynthRef.current) {
+      ambientSynthRef.current.releaseAll()
     }
   }, [])
 
   // Update ambient volume when settings change
   useEffect(() => {
-    if (ambientAudioRef.current) {
-      ambientAudioRef.current.volume = isMuted ? 0 : ambientVolume
+    if (ambientSynthRef.current && !isMuted) {
+      ambientSynthRef.current.volume.value = -25 + (ambientVolume * 15)
+    }
+    if (isMuted && ambientSynthRef.current) {
+      ambientSynthRef.current.releaseAll()
     }
   }, [isMuted, ambientVolume])
 
@@ -436,6 +488,16 @@ export default function WaterRipplePage() {
   useEffect(() => {
     return () => {
       stopCamera()
+      // Cleanup Tone.js
+      if (ambientSynthRef.current) {
+        ambientSynthRef.current.dispose()
+      }
+      if (splashSynthRef.current) {
+        splashSynthRef.current.dispose()
+      }
+      if (reverbRef.current) {
+        reverbRef.current.dispose()
+      }
     }
   }, [stopCamera])
 
