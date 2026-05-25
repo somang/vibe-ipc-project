@@ -450,7 +450,7 @@ export default function WaterRipplePage() {
               <canvas
                 ref={waterCanvasRef}
                 className="absolute inset-0 h-full w-full object-cover"
-                style={{ display: isRunning ? "block" : "none" }}
+                style={{ display: isRunning ? "block" : "none", transform: "scaleX(-1)" }}
               />
               {!isRunning && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-slate-800 to-slate-900">
