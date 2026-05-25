@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
-import { Camera, CameraOff, Settings2, Hand } from "lucide-react"
+import { Camera, CameraOff, Settings2, Waves } from "lucide-react"
 
 declare global {
   interface Window {
@@ -13,26 +13,103 @@ declare global {
   }
 }
 
-export default function HandDetectionPage() {
+// Water ripple simulation class
+class WaterSimulation {
+  width: number
+  height: number
+  current: Float32Array
+  previous: Float32Array
+  damping: number
+
+  constructor(width: number, height: number) {
+    this.width = width
+    this.height = height
+    this.current = new Float32Array(width * height)
+    this.previous = new Float32Array(width * height)
+    this.damping = 0.97
+  }
+
+  addRipple(x: number, y: number, radius: number, strength: number) {
+    const radiusSq = radius * radius
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const px = Math.floor(x + dx)
+        const py = Math.floor(y + dy)
+        if (px >= 0 && px < this.width && py >= 0 && py < this.height) {
+          const distSq = dx * dx + dy * dy
+          if (distSq < radiusSq) {
+            const factor = 1 - Math.sqrt(distSq) / radius
+            this.current[py * this.width + px] += strength * factor
+          }
+        }
+      }
+    }
+  }
+
+  update() {
+    const w = this.width
+    const h = this.height
+
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = y * w + x
+        // Wave propagation formula
+        this.current[idx] = (
+          this.previous[idx - 1] +
+          this.previous[idx + 1] +
+          this.previous[idx - w] +
+          this.previous[idx + w]
+        ) / 2 - this.current[idx]
+        
+        // Apply damping
+        this.current[idx] *= this.damping
+      }
+    }
+
+    // Swap buffers
+    const temp = this.previous
+    this.previous = this.current
+    this.current = temp
+  }
+
+  getDisplacement(x: number, y: number): { dx: number; dy: number } {
+    if (x <= 0 || x >= this.width - 1 || y <= 0 || y >= this.height - 1) {
+      return { dx: 0, dy: 0 }
+    }
+    const idx = Math.floor(y) * this.width + Math.floor(x)
+    const dx = (this.current[idx - 1] - this.current[idx + 1]) * 8
+    const dy = (this.current[idx - this.width] - this.current[idx + this.width]) * 8
+    return { dx, dy }
+  }
+
+  resize(width: number, height: number) {
+    this.width = width
+    this.height = height
+    this.current = new Float32Array(width * height)
+    this.previous = new Float32Array(width * height)
+  }
+}
+
+export default function WaterRipplePage() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const waterCanvasRef = useRef<HTMLCanvasElement>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [cvReady, setCvReady] = useState(false)
-  const [handsDetected, setHandsDetected] = useState(0)
+  const [motionAreas, setMotionAreas] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
-  // HSV thresholds for skin detection (adjustable)
-  const [hMin, setHMin] = useState(0)
-  const [hMax, setHMax] = useState(20)
-  const [sMin, setSMin] = useState(30)
-  const [sMax, setSMax] = useState(150)
-  const [vMin, setVMin] = useState(60)
-  const [vMax, setVMax] = useState(255)
-  const [minArea, setMinArea] = useState(5000)
+  // Motion detection settings
+  const [motionThreshold, setMotionThreshold] = useState(25)
+  const [minMotionArea, setMinMotionArea] = useState(500)
+  const [rippleStrength, setRippleStrength] = useState(150)
+  const [waterOpacity, setWaterOpacity] = useState(0.4)
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
+  const prevFrameRef = useRef<any>(null)
+  const waterSimRef = useRef<WaterSimulation | null>(null)
 
   // Load OpenCV.js
   useEffect(() => {
@@ -81,6 +158,10 @@ export default function HandDetectionPage() {
         
         videoRef.current.onloadedmetadata = () => {
           videoRef.current?.play().then(() => {
+            // Initialize water simulation
+            const w = videoRef.current!.videoWidth
+            const h = videoRef.current!.videoHeight
+            waterSimRef.current = new WaterSimulation(Math.floor(w / 4), Math.floor(h / 4))
             setIsRunning(true)
           }).catch((err) => {
             setError(`Error starting playback: ${err?.message}`)
@@ -113,25 +194,33 @@ export default function HandDetectionPage() {
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
+    if (prevFrameRef.current) {
+      prevFrameRef.current.delete()
+      prevFrameRef.current = null
+    }
     setIsRunning(false)
-    setHandsDetected(0)
+    setMotionAreas(0)
   }, [])
 
-  const detectHands = useCallback(() => {
-    if (!cvReady || !videoRef.current || !canvasRef.current || !isRunning) return
+  const detectMotionAndRipple = useCallback(() => {
+    if (!cvReady || !videoRef.current || !canvasRef.current || !waterCanvasRef.current || !isRunning) return
 
     const cv = window.cv
     const video = videoRef.current
     const canvas = canvasRef.current
+    const waterCanvas = waterCanvasRef.current
     const ctx = canvas.getContext("2d")
+    const waterCtx = waterCanvas.getContext("2d")
 
-    if (!ctx || video.readyState !== 4) {
-      animationRef.current = requestAnimationFrame(detectHands)
+    if (!ctx || !waterCtx || video.readyState !== 4) {
+      animationRef.current = requestAnimationFrame(detectMotionAndRipple)
       return
     }
 
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
+    waterCanvas.width = video.videoWidth
+    waterCanvas.height = video.videoHeight
 
     // Draw video frame to canvas
     ctx.drawImage(video, 0, 0)
@@ -139,118 +228,161 @@ export default function HandDetectionPage() {
     try {
       // Read the frame
       const src = cv.imread(canvas)
-      const hsv = new cv.Mat()
-      const mask = new cv.Mat()
-      const mask2 = new cv.Mat()
-      const combined = new cv.Mat()
+      const gray = new cv.Mat()
+      const blurred = new cv.Mat()
+      
+      // Convert to grayscale
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+      cv.GaussianBlur(gray, blurred, new cv.Size(21, 21), 0)
+
+      // Initialize previous frame if needed
+      if (!prevFrameRef.current) {
+        prevFrameRef.current = blurred.clone()
+        src.delete()
+        gray.delete()
+        blurred.delete()
+        animationRef.current = requestAnimationFrame(detectMotionAndRipple)
+        return
+      }
+
+      // Compute frame difference
+      const diff = new cv.Mat()
+      cv.absdiff(prevFrameRef.current, blurred, diff)
+      
+      // Threshold the difference
+      const thresh = new cv.Mat()
+      cv.threshold(diff, thresh, motionThreshold, 255, cv.THRESH_BINARY)
+      
+      // Dilate to fill holes
       const kernel = cv.Mat.ones(5, 5, cv.CV_8U)
-      const morphed = new cv.Mat()
-      const contours = new cv.MatVector()
-      const hierarchy = new cv.Mat()
-
-      // Convert to HSV
-      cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB)
-      cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV)
-
-      // Create mask for skin color (two ranges to handle red wrap-around in HSV)
-      const lowSkin1 = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [hMin, sMin, vMin, 0])
-      const highSkin1 = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [hMax, sMax, vMax, 255])
-      cv.inRange(hsv, lowSkin1, highSkin1, mask)
-
-      // Second range for skin tones (handles the red hue wrap-around)
-      const lowSkin2 = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [160, sMin, vMin, 0])
-      const highSkin2 = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, sMax, vMax, 255])
-      cv.inRange(hsv, lowSkin2, highSkin2, mask2)
-
-      // Combine masks
-      cv.add(mask, mask2, combined)
-
-      // Morphological operations to clean up the mask
-      cv.morphologyEx(combined, morphed, cv.MORPH_OPEN, kernel)
-      cv.morphologyEx(morphed, morphed, cv.MORPH_CLOSE, kernel)
-      cv.dilate(morphed, morphed, kernel, new cv.Point(-1, -1), 2)
+      const dilated = new cv.Mat()
+      cv.dilate(thresh, dilated, kernel, new cv.Point(-1, -1), 2)
 
       // Find contours
-      cv.findContours(morphed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+      const contours = new cv.MatVector()
+      const hierarchy = new cv.Mat()
+      cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-      // Draw bounding boxes around detected regions (potential hands)
-      let handCount = 0
-      const boundingBoxes: { x: number; y: number; width: number; height: number; area: number }[] = []
+      // Process motion areas and create ripples
+      let areaCount = 0
+      const waterSim = waterSimRef.current
+      
+      if (waterSim) {
+        const scaleX = waterSim.width / video.videoWidth
+        const scaleY = waterSim.height / video.videoHeight
 
-      for (let i = 0; i < contours.size(); i++) {
-        const contour = contours.get(i)
-        const area = cv.contourArea(contour)
-        
-        if (area > minArea) {
-          const rect = cv.boundingRect(contour)
-          const aspectRatio = rect.width / rect.height
+        for (let i = 0; i < contours.size(); i++) {
+          const contour = contours.get(i)
+          const area = cv.contourArea(contour)
           
-          // Filter by aspect ratio (hands are usually somewhat square to tall)
-          if (aspectRatio > 0.2 && aspectRatio < 2.5) {
-            boundingBoxes.push({ ...rect, area })
+          if (area > minMotionArea) {
+            areaCount++
+            const rect = cv.boundingRect(contour)
+            
+            // Add ripple at center of motion
+            const centerX = (rect.x + rect.width / 2) * scaleX
+            const centerY = (rect.y + rect.height / 2) * scaleY
+            const rippleRadius = Math.min(Math.sqrt(area) / 20, 15)
+            waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
           }
         }
+
+        // Update water simulation
+        waterSim.update()
+
+        // Render water effect
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const waterImageData = waterCtx.createImageData(canvas.width, canvas.height)
+        const srcData = imageData.data
+        const dstData = waterImageData.data
+
+        for (let y = 0; y < canvas.height; y++) {
+          for (let x = 0; x < canvas.width; x++) {
+            const simX = x * scaleX
+            const simY = y * scaleY
+            const { dx, dy } = waterSim.getDisplacement(simX, simY)
+            
+            // Get displaced pixel coordinates
+            let srcX = Math.floor(x + dx)
+            let srcY = Math.floor(y + dy)
+            
+            // Clamp to bounds
+            srcX = Math.max(0, Math.min(canvas.width - 1, srcX))
+            srcY = Math.max(0, Math.min(canvas.height - 1, srcY))
+            
+            const srcIdx = (srcY * canvas.width + srcX) * 4
+            const dstIdx = (y * canvas.width + x) * 4
+            
+            // Copy pixel with slight blue tint for water effect
+            const displacement = Math.abs(dx) + Math.abs(dy)
+            const blueTint = Math.min(displacement * 2, 40)
+            
+            dstData[dstIdx] = Math.max(0, srcData[srcIdx] - blueTint * 0.3)
+            dstData[dstIdx + 1] = Math.max(0, srcData[srcIdx + 1] - blueTint * 0.1)
+            dstData[dstIdx + 2] = Math.min(255, srcData[srcIdx + 2] + blueTint)
+            dstData[dstIdx + 3] = 255
+          }
+        }
+
+        waterCtx.putImageData(waterImageData, 0, 0)
+
+        // Draw water surface overlay with caustics
+        waterCtx.globalAlpha = waterOpacity * 0.3
+        waterCtx.fillStyle = "rgba(100, 180, 255, 0.1)"
+        
+        // Draw some caustic-like highlights based on water displacement
+        for (let y = 0; y < canvas.height; y += 8) {
+          for (let x = 0; x < canvas.width; x += 8) {
+            const simX = x * scaleX
+            const simY = y * scaleY
+            const { dx, dy } = waterSim.getDisplacement(simX, simY)
+            const intensity = Math.abs(dx) + Math.abs(dy)
+            
+            if (intensity > 2) {
+              waterCtx.globalAlpha = Math.min(intensity / 20, 0.4) * waterOpacity
+              waterCtx.fillStyle = `rgba(200, 230, 255, ${Math.min(intensity / 15, 0.6)})`
+              waterCtx.fillRect(x - 2, y - 2, 4, 4)
+            }
+          }
+        }
+        
+        waterCtx.globalAlpha = 1
       }
 
-      // Sort by area and take largest regions (likely hands)
-      boundingBoxes.sort((a, b) => b.area - a.area)
-      const maxHands = Math.min(boundingBoxes.length, 10)
+      setMotionAreas(areaCount)
 
-      // Draw on canvas
-      ctx.drawImage(video, 0, 0)
-      
-      for (let i = 0; i < maxHands; i++) {
-        const { x, y, width, height } = boundingBoxes[i]
-        
-        // Draw bounding box
-        ctx.strokeStyle = "#22c55e"
-        ctx.lineWidth = 3
-        ctx.strokeRect(x, y, width, height)
-        
-        // Draw label
-        ctx.fillStyle = "#22c55e"
-        ctx.fillRect(x, y - 25, 80, 25)
-        ctx.fillStyle = "#ffffff"
-        ctx.font = "bold 14px sans-serif"
-        ctx.fillText(`Hand ${i + 1}`, x + 5, y - 8)
-        
-        handCount++
-      }
-
-      setHandsDetected(handCount)
+      // Update previous frame
+      prevFrameRef.current.delete()
+      prevFrameRef.current = blurred.clone()
 
       // Cleanup
       src.delete()
-      hsv.delete()
-      mask.delete()
-      mask2.delete()
-      combined.delete()
+      gray.delete()
+      blurred.delete()
+      diff.delete()
+      thresh.delete()
       kernel.delete()
-      morphed.delete()
+      dilated.delete()
       contours.delete()
       hierarchy.delete()
-      lowSkin1.delete()
-      highSkin1.delete()
-      lowSkin2.delete()
-      highSkin2.delete()
 
     } catch (err) {
       console.error("Detection error:", err)
     }
 
-    animationRef.current = requestAnimationFrame(detectHands)
-  }, [cvReady, isRunning, hMin, hMax, sMin, sMax, vMin, vMax, minArea])
+    animationRef.current = requestAnimationFrame(detectMotionAndRipple)
+  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity])
 
   useEffect(() => {
     if (isRunning && cvReady) {
-      detectHands()
+      detectMotionAndRipple()
     }
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [isRunning, cvReady, detectHands])
+  }, [isRunning, cvReady, detectMotionAndRipple])
 
   useEffect(() => {
     return () => {
@@ -259,35 +391,36 @@ export default function HandDetectionPage() {
   }, [stopCamera])
 
   return (
-    <main className="min-h-screen bg-background p-4 md:p-8">
+    <main className="min-h-screen bg-slate-950 p-4 md:p-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight flex items-center justify-center gap-2">
-            <Hand className="h-8 w-8 text-primary" />
-            Hand Detection with OpenCV.js
+          <h1 className="text-3xl font-bold tracking-tight text-white flex items-center justify-center gap-2">
+            <Waves className="h-8 w-8 text-cyan-400" />
+            Interactive Water Ripples
           </h1>
-          <p className="text-muted-foreground">
-            Real-time hand detection using skin color segmentation and contour analysis
+          <p className="text-slate-400">
+            Move in front of the camera to create realistic water ripple effects
           </p>
         </div>
 
-        <Card>
+        <Card className="bg-slate-900 border-slate-800">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Camera Feed</CardTitle>
-                <CardDescription>
-                  {cvReady ? "OpenCV.js loaded successfully" : "Loading OpenCV.js..."}
+                <CardTitle className="text-white">Camera Feed</CardTitle>
+                <CardDescription className="text-slate-400">
+                  {cvReady ? "OpenCV.js loaded - Ready to detect motion" : "Loading OpenCV.js..."}
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                <div className="rounded-full bg-secondary px-3 py-1 text-sm font-medium">
-                  Hands: {handsDetected}
+                <div className="rounded-full bg-cyan-500/20 text-cyan-400 px-3 py-1 text-sm font-medium">
+                  Motion Areas: {motionAreas}
                 </div>
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={() => setShowSettings(!showSettings)}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
                 >
                   <Settings2 className="h-4 w-4" />
                 </Button>
@@ -296,33 +429,54 @@ export default function HandDetectionPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {error && (
-              <div className="rounded-lg bg-destructive/10 p-4 text-destructive text-sm">
+              <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-4 text-red-400 text-sm">
                 {error}
               </div>
             )}
 
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-muted">
+            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-slate-800 border border-slate-700">
               <video
                 ref={videoRef}
                 className="absolute inset-0 h-full w-full object-cover"
                 playsInline
                 muted
-                style={{ display: isRunning ? "none" : "block" }}
+                style={{ display: "none" }}
               />
               <canvas
                 ref={canvasRef}
                 className="absolute inset-0 h-full w-full object-cover"
+                style={{ display: "none" }}
+              />
+              <canvas
+                ref={waterCanvasRef}
+                className="absolute inset-0 h-full w-full object-cover"
                 style={{ display: isRunning ? "block" : "none" }}
               />
               {!isRunning && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center space-y-2">
-                    <Camera className="h-12 w-12 mx-auto text-muted-foreground" />
-                    <p className="text-muted-foreground">
-                      {cvReady ? "Click Start to begin detection" : "Loading OpenCV.js..."}
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-slate-800 to-slate-900">
+                  <div className="text-center space-y-3">
+                    <div className="relative">
+                      <Waves className="h-16 w-16 mx-auto text-cyan-500/50" />
+                      <div className="absolute inset-0 h-16 w-16 mx-auto animate-ping opacity-20">
+                        <Waves className="h-16 w-16 text-cyan-400" />
+                      </div>
+                    </div>
+                    <p className="text-slate-400">
+                      {cvReady ? "Click Start to begin the water simulation" : "Loading OpenCV.js..."}
                     </p>
                   </div>
                 </div>
+              )}
+              
+              {/* Water surface overlay effect */}
+              {isRunning && (
+                <div 
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    background: "linear-gradient(180deg, rgba(100, 200, 255, 0.05) 0%, rgba(50, 150, 255, 0.1) 100%)",
+                    mixBlendMode: "overlay"
+                  }}
+                />
               )}
             </div>
 
@@ -330,10 +484,10 @@ export default function HandDetectionPage() {
               <Button
                 onClick={startCamera}
                 disabled={!cvReady || isRunning}
-                className="gap-2"
+                className="gap-2 bg-cyan-600 hover:bg-cyan-700 text-white"
               >
                 <Camera className="h-4 w-4" />
-                Start Detection
+                Start Water Effect
               </Button>
               <Button
                 variant="destructive"
@@ -347,95 +501,79 @@ export default function HandDetectionPage() {
             </div>
 
             {showSettings && (
-              <Card>
+              <Card className="bg-slate-800 border-slate-700">
                 <CardHeader>
-                  <CardTitle className="text-lg">Detection Settings</CardTitle>
-                  <CardDescription>
-                    Adjust HSV thresholds for better skin detection in different lighting
+                  <CardTitle className="text-lg text-white">Water & Motion Settings</CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Adjust sensitivity and visual effects
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="grid gap-6 md:grid-cols-2">
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Hue Min: {hMin}</Label>
+                        <Label className="text-slate-300">Motion Threshold: {motionThreshold}</Label>
                         <Slider
-                          value={[hMin]}
-                          onValueChange={([v]) => setHMin(v)}
-                          max={180}
+                          value={[motionThreshold]}
+                          onValueChange={([v]) => setMotionThreshold(v)}
+                          min={5}
+                          max={100}
                           step={1}
+                          className="[&_[role=slider]]:bg-cyan-500"
                         />
+                        <p className="text-xs text-slate-500">Lower = more sensitive to motion</p>
                       </div>
                       <div className="space-y-2">
-                        <Label>Hue Max: {hMax}</Label>
+                        <Label className="text-slate-300">Min Motion Area: {minMotionArea}px²</Label>
                         <Slider
-                          value={[hMax]}
-                          onValueChange={([v]) => setHMax(v)}
-                          max={180}
-                          step={1}
+                          value={[minMotionArea]}
+                          onValueChange={([v]) => setMinMotionArea(v)}
+                          min={100}
+                          max={5000}
+                          step={100}
+                          className="[&_[role=slider]]:bg-cyan-500"
                         />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Saturation Min: {sMin}</Label>
-                        <Slider
-                          value={[sMin]}
-                          onValueChange={([v]) => setSMin(v)}
-                          max={255}
-                          step={1}
-                        />
+                        <p className="text-xs text-slate-500">Filter out small movements/noise</p>
                       </div>
                     </div>
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Saturation Max: {sMax}</Label>
+                        <Label className="text-slate-300">Ripple Strength: {rippleStrength}</Label>
                         <Slider
-                          value={[sMax]}
-                          onValueChange={([v]) => setSMax(v)}
-                          max={255}
-                          step={1}
+                          value={[rippleStrength]}
+                          onValueChange={([v]) => setRippleStrength(v)}
+                          min={50}
+                          max={300}
+                          step={10}
+                          className="[&_[role=slider]]:bg-cyan-500"
                         />
+                        <p className="text-xs text-slate-500">Intensity of water displacement</p>
                       </div>
                       <div className="space-y-2">
-                        <Label>Value Min: {vMin}</Label>
+                        <Label className="text-slate-300">Water Opacity: {Math.round(waterOpacity * 100)}%</Label>
                         <Slider
-                          value={[vMin]}
-                          onValueChange={([v]) => setVMin(v)}
-                          max={255}
-                          step={1}
+                          value={[waterOpacity]}
+                          onValueChange={([v]) => setWaterOpacity(v)}
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          className="[&_[role=slider]]:bg-cyan-500"
                         />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Value Max: {vMax}</Label>
-                        <Slider
-                          value={[vMax]}
-                          onValueChange={([v]) => setVMax(v)}
-                          max={255}
-                          step={1}
-                        />
+                        <p className="text-xs text-slate-500">Visibility of water surface effect</p>
                       </div>
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Min Detection Area: {minArea}px²</Label>
-                    <Slider
-                      value={[minArea]}
-                      onValueChange={([v]) => setMinArea(v)}
-                      min={1000}
-                      max={20000}
-                      step={500}
-                    />
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-              <p className="font-medium mb-2">Tips for best detection:</p>
+            <div className="rounded-lg bg-slate-800/50 border border-slate-700 p-4 text-sm text-slate-400">
+              <p className="font-medium mb-2 text-slate-300">How it works:</p>
               <ul className="list-disc list-inside space-y-1">
-                <li>Ensure good, even lighting on your hands</li>
-                <li>Keep a plain background if possible</li>
-                <li>Adjust HSV settings if detection is poor</li>
-                <li>Multiple hands from different people can be detected</li>
+                <li>Motion detection tracks movement between video frames</li>
+                <li>Moving body parts (hands, head, arms) create ripples in the water</li>
+                <li>The water simulation uses wave propagation physics</li>
+                <li>Adjust settings for different lighting conditions and sensitivity</li>
               </ul>
             </div>
           </CardContent>
