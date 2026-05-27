@@ -97,6 +97,22 @@ export default function WaterRipplePage() {
   const [isMuted, setIsMuted] = useState(false)
   const [splashVolume, setSplashVolume] = useState(0.3)
   const [ambientVolume, setAmbientVolume] = useState(0.2)
+  
+  // Floating words from AI analysis
+  const [floatingWords, setFloatingWords] = useState<Array<{
+    id: number
+    text: string
+    x: number
+    y: number
+    opacity: number
+    scale: number
+    rotation: number
+    velocityX: number
+    velocityY: number
+  }>>([])
+  const screenshotIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const wordIdCounterRef = useRef(0)
+  const [lastApiResponse, setLastApiResponse] = useState<string[]>([])
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
@@ -104,12 +120,16 @@ export default function WaterRipplePage() {
   const waterSimRef = useRef<WaterSimulation | null>(null)
   const frameCountRef = useRef(0)
   
-  // Tone.js audio refs
+  // Tone.js audio refs - Music for Airports style
   const lastSplashTimeRef = useRef<number>(0)
-  const ambientSynthRef = useRef<Tone.PolySynth | null>(null)
-  const splashSynthRef = useRef<Tone.Synth | null>(null)
+  const pianoSynthRef = useRef<Tone.PolySynth | null>(null)
+  const padSynthRef = useRef<Tone.PolySynth | null>(null)
   const reverbRef = useRef<Tone.Reverb | null>(null)
+  const delayRef = useRef<Tone.FeedbackDelay | null>(null)
   const audioInitializedRef = useRef(false)
+  const loopIntervalsRef = useRef<NodeJS.Timeout[]>([])
+  const activeNotesRef = useRef<Set<string>>(new Set())
+  const ambientStartedRef = useRef(false)
 
   // Load OpenCV.js
   useEffect(() => {
@@ -139,96 +159,311 @@ export default function WaterRipplePage() {
     loadOpenCV()
   }, [])
 
-  // Initialize Tone.js audio
+  // Initialize Tone.js audio - Music for Airports style
   const initAudio = useCallback(async () => {
     if (audioInitializedRef.current) return
     
     await Tone.start()
     
-    // Create reverb for water ambience
+    // Shorter reverb to sync with visual ripples
     reverbRef.current = new Tone.Reverb({
-      decay: 4,
-      wet: 0.6
+      decay: 2,
+      wet: 0.4,
+      preDelay: 0.02
     }).toDestination()
     await reverbRef.current.generate()
     
-    // Ambient pad synth - ethereal water atmosphere
-    ambientSynthRef.current = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "sine" },
-      envelope: {
-        attack: 2,
-        decay: 1,
-        sustain: 0.8,
-        release: 3
-      },
-      volume: -20
+    // Tighter delay for visual sync
+    delayRef.current = new Tone.FeedbackDelay({
+      delayTime: "16n",
+      feedback: 0.15,
+      wet: 0.25
     }).connect(reverbRef.current)
     
-    // Splash synth - water drop sound
-    splashSynthRef.current = new Tone.Synth({
-      oscillator: { type: "sine" },
-      envelope: {
-        attack: 0.005,
-        decay: 0.3,
-        sustain: 0,
-        release: 0.5
+    // Piano synth - fast attack/decay to match ripple visuals
+    pianoSynthRef.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { 
+        type: "sine",
+        partialCount: 3
       },
-      volume: -10
+      envelope: {
+        attack: 0.02,
+        decay: 0.4,
+        sustain: 0.1,
+        release: 0.8
+      },
+      volume: -6
+    }).connect(delayRef.current)
+    
+    // Pad synth - faster envelope for visual sync
+    padSynthRef.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "triangle" },
+      envelope: {
+        attack: 0.5,
+        decay: 0.6,
+        sustain: 0.2,
+        release: 1.2
+      },
+      volume: -12
     }).connect(reverbRef.current)
     
     audioInitializedRef.current = true
   }, [])
 
-  // Play water splash/drop sound
-  const playSplashSound = useCallback(() => {
-    if (isMuted || !splashSynthRef.current) return
+  // Play a single ambient note - Music for Airports style
+  // Uses pentatonic scale and random timing for generative feel
+  const playAmbientNote = useCallback((velocity: number = 0.5) => {
+    if (isMuted || !pianoSynthRef.current) return
     
-    const now = Date.now()
-    if (now - lastSplashTimeRef.current < 100) return
-    lastSplashTimeRef.current = now
+    // Pentatonic scale notes used in Music for Airports style
+    // Multiple octaves for variety
+    const notes = [
+      "C3", "D3", "E3", "G3", "A3",
+      "C4", "D4", "E4", "G4", "A4",
+      "C5", "D5", "E5", "G5", "A5",
+      "C6", "D6", "E6"
+    ]
     
-    // Random high pitch for water drop effect
-    const notes = ["C5", "E5", "G5", "B5", "D6", "F6"]
     const note = notes[Math.floor(Math.random() * notes.length)]
     
-    splashSynthRef.current.volume.value = -15 + (splashVolume * 10)
-    splashSynthRef.current.triggerAttackRelease(note, "16n")
+    // Avoid playing the same note if it's still ringing
+    if (activeNotesRef.current.has(note)) return
+    activeNotesRef.current.add(note)
+    
+    // Short duration to sync with visual ripples (0.3-1.2 seconds)
+    const duration = 0.3 + Math.random() * 0.9
+    
+    pianoSynthRef.current.volume.value = -8 + (splashVolume * 10)
+    pianoSynthRef.current.triggerAttackRelease(note, duration, undefined, velocity * 0.6)
+    
+    // Remove from active notes after release
+    setTimeout(() => {
+      activeNotesRef.current.delete(note)
+    }, duration * 1000 + 800)
   }, [isMuted, splashVolume])
 
-  // Start ambient drone
+  // Play water splash - triggers ambient piano note
+  const playSplashSound = useCallback(() => {
+    if (isMuted || !pianoSynthRef.current) return
+    
+    const now = Date.now()
+    // Longer debounce for more sparse, meditative feel
+    if (now - lastSplashTimeRef.current < 150) return
+    lastSplashTimeRef.current = now
+    
+    // Random velocity for dynamic variation
+    const velocity = 0.3 + Math.random() * 0.4
+    playAmbientNote(velocity)
+  }, [isMuted, playAmbientNote])
+
+  // Start ambient music - Music for Airports style generative loops
+  // Different loop lengths create non-repeating patterns
   const startAmbientMusic = useCallback(async () => {
     await initAudio()
     
-    if (!ambientSynthRef.current || isMuted) return
+    if (!padSynthRef.current || isMuted) return
     
-    ambientSynthRef.current.volume.value = -25 + (ambientVolume * 15)
+    padSynthRef.current.volume.value = -15 + (ambientVolume * 15)
     
-    // Play ethereal chord - water ambience
-    const chords = [
-      ["C3", "E3", "G3", "B3"],
-      ["A2", "C3", "E3", "G3"],
-      ["F2", "A2", "C3", "E3"]
+    // Soft sustained pad chord
+    const padNotes = ["C3", "G3", "D4"]
+    padSynthRef.current.triggerAttack(padNotes)
+    
+    // Create multiple overlapping loops with different intervals
+    // This is the key technique from Music for Airports
+    const loopConfigs = [
+      { interval: 8000, notes: ["C4", "E4", "G4"] },
+      { interval: 11000, notes: ["D4", "A4", "E5"] },
+      { interval: 13000, notes: ["G4", "C5", "D5"] },
+      { interval: 17000, notes: ["E4", "A4", "C5"] },
+      { interval: 23000, notes: ["C5", "G5", "E5"] }
     ]
-    const chord = chords[Math.floor(Math.random() * chords.length)]
-    ambientSynthRef.current.triggerAttack(chord)
+    
+    // Clear any existing loops
+    loopIntervalsRef.current.forEach(clearInterval)
+    loopIntervalsRef.current = []
+    
+    // Start each loop with random initial delay
+    loopConfigs.forEach(({ interval, notes }) => {
+      const initialDelay = Math.random() * interval * 0.5
+      
+      setTimeout(() => {
+        if (!pianoSynthRef.current || isMuted) return
+        
+        const playLoop = () => {
+          if (!pianoSynthRef.current || isMuted) return
+          
+          // Randomly pick one or two notes from the set
+          const numNotes = Math.random() > 0.5 ? 1 : 2
+          const selectedNotes = [...notes]
+            .sort(() => Math.random() - 0.5)
+            .slice(0, numNotes)
+          
+          // Random velocity for organic feel
+          const velocity = 0.2 + Math.random() * 0.3
+          
+          pianoSynthRef.current.volume.value = -10 + (ambientVolume * 12)
+          selectedNotes.forEach((note, i) => {
+            // Slight delay between notes for arpeggiated feel
+            setTimeout(() => {
+              if (pianoSynthRef.current && !isMuted) {
+                pianoSynthRef.current.triggerAttackRelease(note, 1.2, undefined, velocity)
+              }
+            }, i * 200)
+          })
+        }
+        
+        playLoop()
+        const loopInterval = setInterval(playLoop, interval)
+        loopIntervalsRef.current.push(loopInterval)
+      }, initialDelay)
+    })
   }, [initAudio, isMuted, ambientVolume])
 
   // Stop ambient music
   const stopAmbientMusic = useCallback(() => {
-    if (ambientSynthRef.current) {
-      ambientSynthRef.current.releaseAll()
+    // Clear all loop intervals
+    loopIntervalsRef.current.forEach(clearInterval)
+    loopIntervalsRef.current = []
+    activeNotesRef.current.clear()
+    
+    if (padSynthRef.current) {
+      padSynthRef.current.releaseAll()
+    }
+    if (pianoSynthRef.current) {
+      pianoSynthRef.current.releaseAll()
     }
   }, [])
 
   // Update ambient volume when settings change
   useEffect(() => {
-    if (ambientSynthRef.current && !isMuted) {
-      ambientSynthRef.current.volume.value = -25 + (ambientVolume * 15)
+    if (padSynthRef.current && !isMuted) {
+      padSynthRef.current.volume.value = -15 + (ambientVolume * 15)
     }
-    if (isMuted && ambientSynthRef.current) {
-      ambientSynthRef.current.releaseAll()
+    if (pianoSynthRef.current && !isMuted) {
+      pianoSynthRef.current.volume.value = -10 + (ambientVolume * 12)
+    }
+    if (isMuted) {
+      loopIntervalsRef.current.forEach(clearInterval)
+      loopIntervalsRef.current = []
+      if (padSynthRef.current) {
+        padSynthRef.current.releaseAll()
+      }
+      if (pianoSynthRef.current) {
+        pianoSynthRef.current.releaseAll()
+      }
     }
   }, [isMuted, ambientVolume])
+
+  // Capture screenshot and send to AI for analysis
+  const captureAndAnalyze = useCallback(async () => {
+    if (!videoRef.current || !isRunning) return
+    
+    console.log("[v0] Capturing screenshot for AI analysis...")
+    
+    const video = videoRef.current
+    const tempCanvas = document.createElement("canvas")
+    tempCanvas.width = video.videoWidth
+    tempCanvas.height = video.videoHeight
+    const ctx = tempCanvas.getContext("2d")
+    if (!ctx) return
+    
+    ctx.drawImage(video, 0, 0)
+    
+    // Convert to base64 (remove data URL prefix)
+    const base64 = tempCanvas.toDataURL("image/jpeg", 0.7).split(",")[1]
+    
+    try {
+      console.log("[v0] Sending to API...")
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64 }),
+      })
+      
+      if (!response.ok) {
+        console.error("[v0] API response not ok:", response.status)
+        throw new Error("API request failed")
+      }
+      
+      const data = await response.json()
+      console.log("[v0] API response data:", data)
+      const words: string[] = data.words || []
+      
+      if (words.length === 0) {
+        console.log("[v0] No words returned from API")
+        return
+      }
+      
+      console.log("[v0] Creating floating words:", words)
+      setLastApiResponse(words)
+      
+      // Create floating word objects with random positions and animations
+      const newWords = words.map((text: string) => ({
+        id: wordIdCounterRef.current++,
+        text,
+        x: 10 + Math.random() * 80, // percentage
+        y: 10 + Math.random() * 80,
+        opacity: 1,
+        scale: 0.8 + Math.random() * 0.6,
+        rotation: -15 + Math.random() * 30,
+        velocityX: -0.3 + Math.random() * 0.6,
+        velocityY: -0.5 + Math.random() * 0.3,
+      }))
+      
+      setFloatingWords(prev => [...prev, ...newWords])
+    } catch (err) {
+      console.error("[v0] Failed to analyze screenshot:", err)
+    }
+  }, [isRunning])
+
+  // Animate floating words - fade out and drift
+  useEffect(() => {
+    const animateWords = () => {
+      setFloatingWords(prev => {
+        if (prev.length === 0) return prev
+        return prev
+          .map(word => ({
+            ...word,
+            x: word.x + word.velocityX * 0.5,
+            y: word.y + word.velocityY * 0.5,
+            opacity: word.opacity - 0.002,
+            velocityY: word.velocityY - 0.005, // float upward slowly
+          }))
+          .filter(word => word.opacity > 0)
+      })
+    }
+    
+    const interval = setInterval(animateWords, 50)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Start/stop screenshot interval when running
+  useEffect(() => {
+    if (isRunning) {
+      // Initial capture after 2 seconds
+      const initialTimeout = setTimeout(() => {
+        captureAndAnalyze()
+      }, 2000)
+      
+      // Then every 10 seconds
+      screenshotIntervalRef.current = setInterval(() => {
+        captureAndAnalyze()
+      }, 10000)
+      
+      return () => {
+        clearTimeout(initialTimeout)
+        if (screenshotIntervalRef.current) {
+          clearInterval(screenshotIntervalRef.current)
+        }
+      }
+    } else {
+      if (screenshotIntervalRef.current) {
+        clearInterval(screenshotIntervalRef.current)
+      }
+      setFloatingWords([])
+    }
+  }, [isRunning, captureAndAnalyze])
 
   const startCamera = async () => {
     setError(null)
@@ -251,15 +486,15 @@ export default function WaterRipplePage() {
         videoRef.current.srcObject = stream
         streamRef.current = stream
         
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play().then(() => {
-            // Initialize water simulation at low resolution for performance
-            const w = videoRef.current!.videoWidth
-            const h = videoRef.current!.videoHeight
-            waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
-            setIsRunning(true)
-            startAmbientMusic()
-          }).catch((err) => {
+  videoRef.current.onloadedmetadata = () => {
+  videoRef.current?.play().then(() => {
+  // Initialize water simulation at low resolution for performance
+  const w = videoRef.current!.videoWidth
+  const h = videoRef.current!.videoHeight
+  waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
+  setIsRunning(true)
+  // Audio will start when motion is first detected
+  }).catch((err) => {
             setError(`Error starting playback: ${err?.message}`)
           })
         }
@@ -294,9 +529,15 @@ export default function WaterRipplePage() {
       prevFrameRef.current.delete()
       prevFrameRef.current = null
     }
-    stopAmbientMusic()
-    setIsRunning(false)
-    setMotionAreas(0)
+    if (screenshotIntervalRef.current) {
+      clearInterval(screenshotIntervalRef.current)
+      screenshotIntervalRef.current = null
+    }
+  stopAmbientMusic()
+  ambientStartedRef.current = false
+  setIsRunning(false)
+  setMotionAreas(0)
+  setFloatingWords([])
   }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
@@ -369,19 +610,25 @@ export default function WaterRipplePage() {
           const contour = contours.get(i)
           const area = cv.contourArea(contour)
           
-          if (area > minMotionArea) {
-            areaCount++
-            const rect = cv.boundingRect(contour)
-            const centerX = (rect.x + rect.width / 2) * scaleX
-            const centerY = (rect.y + rect.height / 2) * scaleY
-            const rippleRadius = Math.min(Math.sqrt(area) / 25, 12)
-            waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
-            
-            if (area > minMotionArea * 2 && !triggeredSplash) {
-              playSplashSound()
-              triggeredSplash = true
-            }
-          }
+  if (area > minMotionArea) {
+  areaCount++
+  const rect = cv.boundingRect(contour)
+  const centerX = (rect.x + rect.width / 2) * scaleX
+  const centerY = (rect.y + rect.height / 2) * scaleY
+  const rippleRadius = Math.min(Math.sqrt(area) / 25, 12)
+  waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
+  
+  // Start ambient music when motion is first detected
+  if (!ambientStartedRef.current) {
+    ambientStartedRef.current = true
+    startAmbientMusic()
+  }
+  
+  if (area > minMotionArea * 2 && !triggeredSplash) {
+  playSplashSound()
+  triggeredSplash = true
+  }
+  }
         }
 
         setMotionAreas(areaCount)
@@ -477,7 +724,7 @@ export default function WaterRipplePage() {
     }
 
     animationRef.current = requestAnimationFrame(detectMotionAndRipple)
-  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity, playSplashSound])
+  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity, playSplashSound, startAmbientMusic])
 
   useEffect(() => {
     if (isRunning && cvReady) {
@@ -493,12 +740,18 @@ export default function WaterRipplePage() {
   useEffect(() => {
     return () => {
       stopCamera()
+      // Clear loop intervals
+      loopIntervalsRef.current.forEach(clearInterval)
+      loopIntervalsRef.current = []
       // Cleanup Tone.js
-      if (ambientSynthRef.current) {
-        ambientSynthRef.current.dispose()
+      if (padSynthRef.current) {
+        padSynthRef.current.dispose()
       }
-      if (splashSynthRef.current) {
-        splashSynthRef.current.dispose()
+      if (pianoSynthRef.current) {
+        pianoSynthRef.current.dispose()
+      }
+      if (delayRef.current) {
+        delayRef.current.dispose()
       }
       if (reverbRef.current) {
         reverbRef.current.dispose()
@@ -537,6 +790,40 @@ export default function WaterRipplePage() {
               mixBlendMode: "overlay"
             }}
           />
+        )}
+
+        {/* Floating AI-generated words */}
+        {floatingWords.map(word => (
+          <div
+            key={word.id}
+            className="absolute pointer-events-none select-none font-light tracking-wider z-50"
+            style={{
+              left: `${word.x}%`,
+              top: `${word.y}%`,
+              opacity: word.opacity,
+              transform: `scale(${word.scale}) rotate(${word.rotation}deg)`,
+              fontSize: `${1.2 + word.scale * 0.8}rem`,
+              color: "rgba(255, 255, 255, 0.95)",
+              textShadow: "0 0 20px rgba(100, 200, 255, 0.8), 0 0 40px rgba(100, 200, 255, 0.5), 0 2px 4px rgba(0,0,0,0.5)",
+              willChange: "transform, opacity, left, top",
+            }}
+          >
+            {word.text}
+          </div>
+        ))}
+
+        {/* API Response Display */}
+        {isRunning && lastApiResponse.length > 0 && (
+          <div className="absolute bottom-4 left-4 z-50 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-xs">
+            <p className="text-cyan-400 text-xs uppercase tracking-wider mb-2">AI Keywords</p>
+            <div className="flex flex-wrap gap-2">
+              {lastApiResponse.map((word, i) => (
+                <span key={i} className="text-white/90 text-sm px-2 py-1 bg-cyan-500/20 rounded">
+                  {word}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Start screen */}
@@ -643,7 +930,7 @@ export default function WaterRipplePage() {
                 />
               </div>
               <div className="border-t border-white/10 pt-4 space-y-3">
-                <label className="text-white/60 text-xs uppercase tracking-wide">Splash Volume: {Math.round(splashVolume * 100)}%</label>
+                <label className="text-white/60 text-xs uppercase tracking-wide">Piano Notes: {Math.round(splashVolume * 100)}%</label>
                 <Slider
                   value={[splashVolume]}
                   onValueChange={([v]) => setSplashVolume(v)}
@@ -655,7 +942,7 @@ export default function WaterRipplePage() {
                 />
               </div>
               <div className="space-y-3">
-                <label className="text-white/60 text-xs uppercase tracking-wide">Ambient Volume: {Math.round(ambientVolume * 100)}%</label>
+                <label className="text-white/60 text-xs uppercase tracking-wide">Ambient Loops: {Math.round(ambientVolume * 100)}%</label>
                 <Slider
                   value={[ambientVolume]}
                   onValueChange={([v]) => setAmbientVolume(v)}
