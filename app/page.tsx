@@ -149,44 +149,44 @@ export default function WaterRipplePage() {
     
     await Tone.start()
     
-    // Long reverb for spacious, ethereal quality
+    // Shorter reverb to sync with visual ripples
     reverbRef.current = new Tone.Reverb({
-      decay: 8,
-      wet: 0.7,
-      preDelay: 0.1
+      decay: 2,
+      wet: 0.4,
+      preDelay: 0.02
     }).toDestination()
     await reverbRef.current.generate()
     
-    // Feedback delay for ambient trails
+    // Tighter delay for visual sync
     delayRef.current = new Tone.FeedbackDelay({
-      delayTime: "4n",
-      feedback: 0.3,
-      wet: 0.4
+      delayTime: "16n",
+      feedback: 0.15,
+      wet: 0.25
     }).connect(reverbRef.current)
     
-    // Piano synth - soft, bell-like tones similar to Music for Airports
+    // Piano synth - fast attack/decay to match ripple visuals
     pianoSynthRef.current = new Tone.PolySynth(Tone.Synth, {
       oscillator: { 
         type: "sine",
         partialCount: 3
       },
       envelope: {
-        attack: 1.5,
-        decay: 2,
-        sustain: 0.4,
-        release: 6
+        attack: 0.02,
+        decay: 0.4,
+        sustain: 0.1,
+        release: 0.8
       },
       volume: -18
     }).connect(delayRef.current)
     
-    // Soft pad synth for underlying atmosphere
+    // Pad synth - faster envelope for visual sync
     padSynthRef.current = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "triangle" },
       envelope: {
-        attack: 4,
-        decay: 2,
-        sustain: 0.6,
-        release: 8
+        attack: 0.5,
+        decay: 0.6,
+        sustain: 0.2,
+        release: 1.2
       },
       volume: -28
     }).connect(reverbRef.current)
@@ -214,8 +214,8 @@ export default function WaterRipplePage() {
     if (activeNotesRef.current.has(note)) return
     activeNotesRef.current.add(note)
     
-    // Random duration between 4 and 12 seconds
-    const duration = 4 + Math.random() * 8
+    // Short duration to sync with visual ripples (0.3-1.2 seconds)
+    const duration = 0.3 + Math.random() * 0.9
     
     pianoSynthRef.current.volume.value = -20 + (splashVolume * 8)
     pianoSynthRef.current.triggerAttackRelease(note, duration, undefined, velocity * 0.6)
@@ -223,7 +223,7 @@ export default function WaterRipplePage() {
     // Remove from active notes after release
     setTimeout(() => {
       activeNotesRef.current.delete(note)
-    }, duration * 1000 + 6000)
+    }, duration * 1000 + 800)
   }, [isMuted, splashVolume])
 
   // Play water splash - triggers ambient piano note
@@ -232,7 +232,7 @@ export default function WaterRipplePage() {
     
     const now = Date.now()
     // Longer debounce for more sparse, meditative feel
-    if (now - lastSplashTimeRef.current < 300) return
+    if (now - lastSplashTimeRef.current < 150) return
     lastSplashTimeRef.current = now
     
     // Random velocity for dynamic variation
@@ -291,7 +291,7 @@ export default function WaterRipplePage() {
             // Slight delay between notes for arpeggiated feel
             setTimeout(() => {
               if (pianoSynthRef.current && !isMuted) {
-                pianoSynthRef.current.triggerAttackRelease(note, 6, undefined, velocity)
+                pianoSynthRef.current.triggerAttackRelease(note, 1.2, undefined, velocity)
               }
             }, i * 200)
           })
