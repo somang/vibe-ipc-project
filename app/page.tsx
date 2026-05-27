@@ -113,6 +113,7 @@ export default function WaterRipplePage() {
   const audioInitializedRef = useRef(false)
   const loopIntervalsRef = useRef<NodeJS.Timeout[]>([])
   const activeNotesRef = useRef<Set<string>>(new Set())
+  const ambientStartedRef = useRef(false)
 
   // Load OpenCV.js
   useEffect(() => {
@@ -359,15 +360,15 @@ export default function WaterRipplePage() {
         videoRef.current.srcObject = stream
         streamRef.current = stream
         
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play().then(() => {
-            // Initialize water simulation at low resolution for performance
-            const w = videoRef.current!.videoWidth
-            const h = videoRef.current!.videoHeight
-            waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
-            setIsRunning(true)
-            startAmbientMusic()
-          }).catch((err) => {
+  videoRef.current.onloadedmetadata = () => {
+  videoRef.current?.play().then(() => {
+  // Initialize water simulation at low resolution for performance
+  const w = videoRef.current!.videoWidth
+  const h = videoRef.current!.videoHeight
+  waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
+  setIsRunning(true)
+  // Audio will start when motion is first detected
+  }).catch((err) => {
             setError(`Error starting playback: ${err?.message}`)
           })
         }
@@ -402,9 +403,10 @@ export default function WaterRipplePage() {
       prevFrameRef.current.delete()
       prevFrameRef.current = null
     }
-    stopAmbientMusic()
-    setIsRunning(false)
-    setMotionAreas(0)
+  stopAmbientMusic()
+  ambientStartedRef.current = false
+  setIsRunning(false)
+  setMotionAreas(0)
   }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
@@ -477,19 +479,25 @@ export default function WaterRipplePage() {
           const contour = contours.get(i)
           const area = cv.contourArea(contour)
           
-          if (area > minMotionArea) {
-            areaCount++
-            const rect = cv.boundingRect(contour)
-            const centerX = (rect.x + rect.width / 2) * scaleX
-            const centerY = (rect.y + rect.height / 2) * scaleY
-            const rippleRadius = Math.min(Math.sqrt(area) / 25, 12)
-            waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
-            
-            if (area > minMotionArea * 2 && !triggeredSplash) {
-              playSplashSound()
-              triggeredSplash = true
-            }
-          }
+  if (area > minMotionArea) {
+  areaCount++
+  const rect = cv.boundingRect(contour)
+  const centerX = (rect.x + rect.width / 2) * scaleX
+  const centerY = (rect.y + rect.height / 2) * scaleY
+  const rippleRadius = Math.min(Math.sqrt(area) / 25, 12)
+  waterSim.addRipple(centerX, centerY, rippleRadius, rippleStrength)
+  
+  // Start ambient music when motion is first detected
+  if (!ambientStartedRef.current) {
+    ambientStartedRef.current = true
+    startAmbientMusic()
+  }
+  
+  if (area > minMotionArea * 2 && !triggeredSplash) {
+  playSplashSound()
+  triggeredSplash = true
+  }
+  }
         }
 
         setMotionAreas(areaCount)
@@ -585,7 +593,7 @@ export default function WaterRipplePage() {
     }
 
     animationRef.current = requestAnimationFrame(detectMotionAndRipple)
-  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity, playSplashSound])
+  }, [cvReady, isRunning, motionThreshold, minMotionArea, rippleStrength, waterOpacity, playSplashSound, startAmbientMusic])
 
   useEffect(() => {
     if (isRunning && cvReady) {
