@@ -112,6 +112,7 @@ export default function WaterRipplePage() {
   }>>([])
   const screenshotIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const wordIdCounterRef = useRef(0)
+  const [lastApiResponse, setLastApiResponse] = useState<string[]>([])
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
@@ -395,6 +396,7 @@ export default function WaterRipplePage() {
       }
       
       console.log("[v0] Creating floating words:", words)
+      setLastApiResponse(words)
       
       // Create floating word objects with random positions and animations
       const newWords = words.map((text: string) => ({
@@ -417,25 +419,24 @@ export default function WaterRipplePage() {
 
   // Animate floating words - fade out and drift
   useEffect(() => {
-    if (floatingWords.length === 0) return
-    
     const animateWords = () => {
-      setFloatingWords(prev => 
-        prev
+      setFloatingWords(prev => {
+        if (prev.length === 0) return prev
+        return prev
           .map(word => ({
             ...word,
-            x: word.x + word.velocityX,
-            y: word.y + word.velocityY,
-            opacity: word.opacity - 0.003,
-            velocityY: word.velocityY - 0.01, // float upward
+            x: word.x + word.velocityX * 0.5,
+            y: word.y + word.velocityY * 0.5,
+            opacity: word.opacity - 0.002,
+            velocityY: word.velocityY - 0.005, // float upward slowly
           }))
           .filter(word => word.opacity > 0)
-      )
+      })
     }
     
     const interval = setInterval(animateWords, 50)
     return () => clearInterval(interval)
-  }, [floatingWords.length > 0])
+  }, [])
 
   // Start/stop screenshot interval when running
   useEffect(() => {
@@ -810,6 +811,20 @@ export default function WaterRipplePage() {
             {word.text}
           </div>
         ))}
+
+        {/* API Response Display */}
+        {isRunning && lastApiResponse.length > 0 && (
+          <div className="absolute bottom-4 left-4 z-50 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-xs">
+            <p className="text-cyan-400 text-xs uppercase tracking-wider mb-2">AI Keywords</p>
+            <div className="flex flex-wrap gap-2">
+              {lastApiResponse.map((word, i) => (
+                <span key={i} className="text-white/90 text-sm px-2 py-1 bg-cyan-500/20 rounded">
+                  {word}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Start screen */}
         {!isRunning && (
