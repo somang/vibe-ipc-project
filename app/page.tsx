@@ -792,36 +792,82 @@ export default function WaterRipplePage() {
           />
         )}
 
-        {/* Floating AI-generated words */}
-        {floatingWords.map(word => (
-          <div
-            key={word.id}
-            className="absolute pointer-events-none select-none font-light tracking-wider z-50"
+        {/* Floating AI-generated words - Pop Art Style */}
+        {floatingWords.map((word, index) => {
+          const popColors = [
+            { bg: "#FF3B30", stroke: "#000", text: "#FFF" },
+            { bg: "#FFCC00", stroke: "#000", text: "#000" },
+            { bg: "#FF2D92", stroke: "#000", text: "#FFF" },
+            { bg: "#00D4FF", stroke: "#000", text: "#000" },
+            { bg: "#4CD964", stroke: "#000", text: "#000" },
+            { bg: "#FF9500", stroke: "#000", text: "#000" },
+          ]
+          const color = popColors[word.id % popColors.length]
+          return (
+            <div
+              key={word.id}
+              className="absolute pointer-events-none select-none z-50"
+              style={{
+                left: `${word.x}%`,
+                top: `${word.y}%`,
+                opacity: word.opacity,
+                transform: `scale(${word.scale * 1.2}) rotate(${word.rotation}deg)`,
+                willChange: "transform, opacity, left, top",
+              }}
+            >
+              <span
+                className="font-black uppercase tracking-tight"
+                style={{
+                  fontSize: `${1.8 + word.scale}rem`,
+                  color: color.text,
+                  backgroundColor: color.bg,
+                  padding: "4px 12px",
+                  border: `4px solid ${color.stroke}`,
+                  boxShadow: `6px 6px 0px ${color.stroke}`,
+                  display: "inline-block",
+                  WebkitTextStroke: `1px ${color.stroke}`,
+                }}
+              >
+                {word.text}
+              </span>
+            </div>
+          )
+        })}
+
+        {/* API Response Display - Pop Art Style */}
+        {isRunning && lastApiResponse.length > 0 && (
+          <div 
+            className="absolute bottom-4 left-4 z-50 p-4 max-w-sm"
             style={{
-              left: `${word.x}%`,
-              top: `${word.y}%`,
-              opacity: word.opacity,
-              transform: `scale(${word.scale}) rotate(${word.rotation}deg)`,
-              fontSize: `${1.2 + word.scale * 0.8}rem`,
-              color: "rgba(255, 255, 255, 0.95)",
-              textShadow: "0 0 20px rgba(100, 200, 255, 0.8), 0 0 40px rgba(100, 200, 255, 0.5), 0 2px 4px rgba(0,0,0,0.5)",
-              willChange: "transform, opacity, left, top",
+              backgroundColor: "#FFF",
+              border: "4px solid #000",
+              boxShadow: "8px 8px 0px #000",
             }}
           >
-            {word.text}
-          </div>
-        ))}
-
-        {/* API Response Display */}
-        {isRunning && lastApiResponse.length > 0 && (
-          <div className="absolute bottom-4 left-4 z-50 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-xs">
-            <p className="text-cyan-400 text-xs uppercase tracking-wider mb-2">AI Keywords</p>
+            <p 
+              className="text-xs uppercase tracking-wider mb-3 font-black"
+              style={{ color: "#FF2D92" }}
+            >
+              AI Keywords
+            </p>
             <div className="flex flex-wrap gap-2">
-              {lastApiResponse.map((word, i) => (
-                <span key={i} className="text-white/90 text-sm px-2 py-1 bg-cyan-500/20 rounded">
-                  {word}
-                </span>
-              ))}
+              {lastApiResponse.map((word, i) => {
+                const colors = ["#FF3B30", "#FFCC00", "#FF2D92", "#00D4FF", "#4CD964"]
+                return (
+                  <span 
+                    key={i} 
+                    className="text-sm font-black uppercase px-2 py-1"
+                    style={{
+                      backgroundColor: colors[i % colors.length],
+                      color: i === 1 || i === 3 || i === 4 ? "#000" : "#FFF",
+                      border: "2px solid #000",
+                      boxShadow: "3px 3px 0px #000",
+                    }}
+                  >
+                    {word}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
