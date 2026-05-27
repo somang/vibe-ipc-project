@@ -192,7 +192,7 @@ export default function WaterRipplePage() {
         sustain: 0.1,
         release: 0.8
       },
-      volume: -18
+      volume: -6
     }).connect(delayRef.current)
     
     // Pad synth - faster envelope for visual sync
@@ -204,7 +204,7 @@ export default function WaterRipplePage() {
         sustain: 0.2,
         release: 1.2
       },
-      volume: -28
+      volume: -12
     }).connect(reverbRef.current)
     
     audioInitializedRef.current = true
@@ -233,7 +233,7 @@ export default function WaterRipplePage() {
     // Short duration to sync with visual ripples (0.3-1.2 seconds)
     const duration = 0.3 + Math.random() * 0.9
     
-    pianoSynthRef.current.volume.value = -20 + (splashVolume * 8)
+    pianoSynthRef.current.volume.value = -8 + (splashVolume * 10)
     pianoSynthRef.current.triggerAttackRelease(note, duration, undefined, velocity * 0.6)
     
     // Remove from active notes after release
@@ -263,7 +263,7 @@ export default function WaterRipplePage() {
     
     if (!padSynthRef.current || isMuted) return
     
-    padSynthRef.current.volume.value = -30 + (ambientVolume * 12)
+    padSynthRef.current.volume.value = -15 + (ambientVolume * 15)
     
     // Soft sustained pad chord
     const padNotes = ["C3", "G3", "D4"]
@@ -302,7 +302,7 @@ export default function WaterRipplePage() {
           // Random velocity for organic feel
           const velocity = 0.2 + Math.random() * 0.3
           
-          pianoSynthRef.current.volume.value = -22 + (ambientVolume * 10)
+          pianoSynthRef.current.volume.value = -10 + (ambientVolume * 12)
           selectedNotes.forEach((note, i) => {
             // Slight delay between notes for arpeggiated feel
             setTimeout(() => {
@@ -338,10 +338,10 @@ export default function WaterRipplePage() {
   // Update ambient volume when settings change
   useEffect(() => {
     if (padSynthRef.current && !isMuted) {
-      padSynthRef.current.volume.value = -30 + (ambientVolume * 12)
+      padSynthRef.current.volume.value = -15 + (ambientVolume * 15)
     }
     if (pianoSynthRef.current && !isMuted) {
-      pianoSynthRef.current.volume.value = -22 + (ambientVolume * 10)
+      pianoSynthRef.current.volume.value = -10 + (ambientVolume * 12)
     }
     if (isMuted) {
       loopIntervalsRef.current.forEach(clearInterval)
