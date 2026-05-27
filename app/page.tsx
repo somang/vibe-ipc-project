@@ -97,6 +97,21 @@ export default function WaterRipplePage() {
   const [isMuted, setIsMuted] = useState(false)
   const [splashVolume, setSplashVolume] = useState(0.3)
   const [ambientVolume, setAmbientVolume] = useState(0.2)
+  
+  // Floating words from AI analysis
+  const [floatingWords, setFloatingWords] = useState<Array<{
+    id: number
+    text: string
+    x: number
+    y: number
+    opacity: number
+    scale: number
+    rotation: number
+    velocityX: number
+    velocityY: number
+  }>>([])
+  const screenshotIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const wordIdCounterRef = useRef(0)
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
@@ -339,6 +354,102 @@ export default function WaterRipplePage() {
     }
   }, [isMuted, ambientVolume])
 
+  // Capture screenshot and send to AI for analysis
+  const captureAndAnalyze = useCallback(async () => {
+    if (!videoRef.current || !isRunning) return
+    
+    const video = videoRef.current
+    const tempCanvas = document.createElement("canvas")
+    tempCanvas.width = video.videoWidth
+    tempCanvas.height = video.videoHeight
+    const ctx = tempCanvas.getContext("2d")
+    if (!ctx) return
+    
+    ctx.drawImage(video, 0, 0)
+    
+    // Convert to base64 (remove data URL prefix)
+    const base64 = tempCanvas.toDataURL("image/jpeg", 0.7).split(",")[1]
+    
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64 }),
+      })
+      
+      if (!response.ok) throw new Error("API request failed")
+      
+      const data = await response.json()
+      const words: string[] = data.words || []
+      
+      // Create floating word objects with random positions and animations
+      const newWords = words.map((text: string) => ({
+        id: wordIdCounterRef.current++,
+        text,
+        x: 10 + Math.random() * 80, // percentage
+        y: 10 + Math.random() * 80,
+        opacity: 1,
+        scale: 0.8 + Math.random() * 0.6,
+        rotation: -15 + Math.random() * 30,
+        velocityX: -0.3 + Math.random() * 0.6,
+        velocityY: -0.5 + Math.random() * 0.3,
+      }))
+      
+      setFloatingWords(prev => [...prev, ...newWords])
+    } catch (err) {
+      console.error("Failed to analyze screenshot:", err)
+    }
+  }, [isRunning])
+
+  // Animate floating words - fade out and drift
+  useEffect(() => {
+    if (floatingWords.length === 0) return
+    
+    const animateWords = () => {
+      setFloatingWords(prev => 
+        prev
+          .map(word => ({
+            ...word,
+            x: word.x + word.velocityX,
+            y: word.y + word.velocityY,
+            opacity: word.opacity - 0.003,
+            velocityY: word.velocityY - 0.01, // float upward
+          }))
+          .filter(word => word.opacity > 0)
+      )
+    }
+    
+    const interval = setInterval(animateWords, 50)
+    return () => clearInterval(interval)
+  }, [floatingWords.length > 0])
+
+  // Start/stop screenshot interval when running
+  useEffect(() => {
+    if (isRunning) {
+      // Initial capture after 2 seconds
+      const initialTimeout = setTimeout(() => {
+        captureAndAnalyze()
+      }, 2000)
+      
+      // Then every 10 seconds
+      screenshotIntervalRef.current = setInterval(() => {
+        captureAndAnalyze()
+      }, 10000)
+      
+      return () => {
+        clearTimeout(initialTimeout)
+        if (screenshotIntervalRef.current) {
+          clearInterval(screenshotIntervalRef.current)
+        }
+      }
+    } else {
+      if (screenshotIntervalRef.current) {
+        clearInterval(screenshotIntervalRef.current)
+      }
+      setFloatingWords([])
+    }
+  }, [isRunning, captureAndAnalyze])
+
   const startCamera = async () => {
     setError(null)
 
@@ -403,10 +514,15 @@ export default function WaterRipplePage() {
       prevFrameRef.current.delete()
       prevFrameRef.current = null
     }
+    if (screenshotIntervalRef.current) {
+      clearInterval(screenshotIntervalRef.current)
+      screenshotIntervalRef.current = null
+    }
   stopAmbientMusic()
   ambientStartedRef.current = false
   setIsRunning(false)
   setMotionAreas(0)
+  setFloatingWords([])
   }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
@@ -660,6 +776,27 @@ export default function WaterRipplePage() {
             }}
           />
         )}
+
+        {/* Floating AI-generated words */}
+        {floatingWords.map(word => (
+          <div
+            key={word.id}
+            className="absolute pointer-events-none select-none font-light tracking-wider"
+            style={{
+              left: `${word.x}%`,
+              top: `${word.y}%`,
+              opacity: word.opacity,
+              transform: `scale(${word.scale}) rotate(${word.rotation}deg)`,
+              fontSize: `${1.2 + word.scale * 0.8}rem`,
+              color: "rgba(255, 255, 255, 0.85)",
+              textShadow: "0 0 20px rgba(100, 200, 255, 0.6), 0 0 40px rgba(100, 200, 255, 0.3)",
+              transition: "opacity 0.1s ease-out",
+              willChange: "transform, opacity, left, top",
+            }}
+          >
+            {word.text}
+          </div>
+        ))}
 
         {/* Start screen */}
         {!isRunning && (
