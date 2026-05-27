@@ -358,6 +358,8 @@ export default function WaterRipplePage() {
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !isRunning) return
     
+    console.log("[v0] Capturing screenshot for AI analysis...")
+    
     const video = videoRef.current
     const tempCanvas = document.createElement("canvas")
     tempCanvas.width = video.videoWidth
@@ -371,16 +373,28 @@ export default function WaterRipplePage() {
     const base64 = tempCanvas.toDataURL("image/jpeg", 0.7).split(",")[1]
     
     try {
+      console.log("[v0] Sending to API...")
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64: base64 }),
       })
       
-      if (!response.ok) throw new Error("API request failed")
+      if (!response.ok) {
+        console.error("[v0] API response not ok:", response.status)
+        throw new Error("API request failed")
+      }
       
       const data = await response.json()
+      console.log("[v0] API response data:", data)
       const words: string[] = data.words || []
+      
+      if (words.length === 0) {
+        console.log("[v0] No words returned from API")
+        return
+      }
+      
+      console.log("[v0] Creating floating words:", words)
       
       // Create floating word objects with random positions and animations
       const newWords = words.map((text: string) => ({
@@ -397,7 +411,7 @@ export default function WaterRipplePage() {
       
       setFloatingWords(prev => [...prev, ...newWords])
     } catch (err) {
-      console.error("Failed to analyze screenshot:", err)
+      console.error("[v0] Failed to analyze screenshot:", err)
     }
   }, [isRunning])
 
@@ -781,16 +795,15 @@ export default function WaterRipplePage() {
         {floatingWords.map(word => (
           <div
             key={word.id}
-            className="absolute pointer-events-none select-none font-light tracking-wider"
+            className="absolute pointer-events-none select-none font-light tracking-wider z-50"
             style={{
               left: `${word.x}%`,
               top: `${word.y}%`,
               opacity: word.opacity,
               transform: `scale(${word.scale}) rotate(${word.rotation}deg)`,
               fontSize: `${1.2 + word.scale * 0.8}rem`,
-              color: "rgba(255, 255, 255, 0.85)",
-              textShadow: "0 0 20px rgba(100, 200, 255, 0.6), 0 0 40px rgba(100, 200, 255, 0.3)",
-              transition: "opacity 0.1s ease-out",
+              color: "rgba(255, 255, 255, 0.95)",
+              textShadow: "0 0 20px rgba(100, 200, 255, 0.8), 0 0 40px rgba(100, 200, 255, 0.5), 0 2px 4px rgba(0,0,0,0.5)",
               willChange: "transform, opacity, left, top",
             }}
           >

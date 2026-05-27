@@ -14,14 +14,14 @@ export async function POST(request: NextRequest) {
     }
 
     const response = await together.chat.completions.create({
-      model: "meta-llama/Llama-Vision-Free",
+      model: "google/gemma-3n-e4b-it",
       messages: [
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: "Describe this image in 5-10 evocative, poetic single words or short phrases. Return ONLY a JSON array of strings, no other text. Example: [\"flowing\", \"ethereal light\", \"movement\", \"blue depths\", \"calm\"]",
+              text: "What do you see here? Show only Five keywords in a JSON format without any words.",
             },
             {
               type: "image_url",
@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
     });
 
     const content = response.choices[0]?.message?.content || "[]";
+    console.log("[v0] AI response:", content);
     
     // Try to parse JSON from the response
     let words: string[] = [];
@@ -54,9 +55,10 @@ export async function POST(request: NextRequest) {
         .filter((w: string) => w.length > 0);
     }
 
+    console.log("[v0] Parsed words:", words);
     return NextResponse.json({ words });
   } catch (error) {
-    console.error("TogetherAI API error:", error);
+    console.error("[v0] TogetherAI API error:", error);
     return NextResponse.json(
       { error: "Failed to analyze image" },
       { status: 500 }
