@@ -792,17 +792,9 @@ export default function WaterRipplePage() {
           />
         )}
 
-        {/* Floating AI-generated words - Pop Art Style */}
-        {floatingWords.map((word, index) => {
-          const popColors = [
-            { bg: "#FF3B30", stroke: "#000", text: "#FFF" },
-            { bg: "#FFCC00", stroke: "#000", text: "#000" },
-            { bg: "#FF2D92", stroke: "#000", text: "#FFF" },
-            { bg: "#00D4FF", stroke: "#000", text: "#000" },
-            { bg: "#4CD964", stroke: "#000", text: "#000" },
-            { bg: "#FF9500", stroke: "#000", text: "#000" },
-          ]
-          const color = popColors[word.id % popColors.length]
+        {/* Floating AI-generated words - Water Style */}
+        {floatingWords.map((word) => {
+          const shimmer = Math.sin(Date.now() / 500 + word.id) * 0.1
           return (
             <div
               key={word.id}
@@ -810,22 +802,27 @@ export default function WaterRipplePage() {
               style={{
                 left: `${word.x}%`,
                 top: `${word.y}%`,
-                opacity: word.opacity,
-                transform: `scale(${word.scale * 1.2}) rotate(${word.rotation}deg)`,
+                opacity: word.opacity * (0.7 + shimmer),
+                transform: `scale(${word.scale}) rotate(${word.rotation * 0.5}deg) skewX(${Math.sin(word.id) * 3}deg)`,
                 willChange: "transform, opacity, left, top",
               }}
             >
               <span
-                className="font-black uppercase tracking-tight"
+                className="font-light italic lowercase tracking-widest"
                 style={{
-                  fontSize: `${1.8 + word.scale}rem`,
-                  color: color.text,
-                  backgroundColor: color.bg,
-                  padding: "4px 12px",
-                  border: `4px solid ${color.stroke}`,
-                  boxShadow: `6px 6px 0px ${color.stroke}`,
+                  fontSize: `${1.4 + word.scale * 0.6}rem`,
+                  color: "transparent",
+                  background: `linear-gradient(180deg, rgba(180, 230, 255, 0.95) 0%, rgba(100, 200, 255, 0.85) 50%, rgba(50, 150, 220, 0.75) 100%)`,
+                  WebkitBackgroundClip: "text",
+                  backgroundClip: "text",
+                  textShadow: `
+                    0 0 30px rgba(100, 200, 255, 0.6),
+                    0 0 60px rgba(50, 150, 255, 0.4),
+                    0 2px 4px rgba(0, 50, 100, 0.3),
+                    0 0 2px rgba(255, 255, 255, 0.8)
+                  `,
+                  filter: `blur(${0.3 + (1 - word.opacity) * 2}px)`,
                   display: "inline-block",
-                  WebkitTextStroke: `1px ${color.stroke}`,
                 }}
               >
                 {word.text}
@@ -834,40 +831,39 @@ export default function WaterRipplePage() {
           )
         })}
 
-        {/* API Response Display - Pop Art Style */}
+        {/* API Response Display - Water Style */}
         {isRunning && lastApiResponse.length > 0 && (
           <div 
-            className="absolute bottom-4 left-4 z-50 p-4 max-w-sm"
+            className="absolute bottom-4 left-4 z-50 p-4 max-w-sm backdrop-blur-md"
             style={{
-              backgroundColor: "#FFF",
-              border: "4px solid #000",
-              boxShadow: "8px 8px 0px #000",
+              background: "linear-gradient(135deg, rgba(50, 150, 200, 0.3) 0%, rgba(100, 180, 220, 0.2) 100%)",
+              borderRadius: "16px",
+              border: "1px solid rgba(150, 220, 255, 0.3)",
+              boxShadow: "0 8px 32px rgba(50, 150, 200, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
             }}
           >
             <p 
-              className="text-xs uppercase tracking-wider mb-3 font-black"
-              style={{ color: "#FF2D92" }}
+              className="text-xs uppercase tracking-widest mb-3 font-light"
+              style={{ color: "rgba(180, 230, 255, 0.9)" }}
             >
-              AI Keywords
+              ripples
             </p>
             <div className="flex flex-wrap gap-2">
-              {lastApiResponse.map((word, i) => {
-                const colors = ["#FF3B30", "#FFCC00", "#FF2D92", "#00D4FF", "#4CD964"]
-                return (
-                  <span 
-                    key={i} 
-                    className="text-sm font-black uppercase px-2 py-1"
-                    style={{
-                      backgroundColor: colors[i % colors.length],
-                      color: i === 1 || i === 3 || i === 4 ? "#000" : "#FFF",
-                      border: "2px solid #000",
-                      boxShadow: "3px 3px 0px #000",
-                    }}
-                  >
-                    {word}
-                  </span>
-                )
-              })}
+              {lastApiResponse.map((word, i) => (
+                <span 
+                  key={i} 
+                  className="text-sm font-light italic lowercase px-3 py-1"
+                  style={{
+                    background: "linear-gradient(180deg, rgba(100, 200, 255, 0.25) 0%, rgba(50, 150, 200, 0.15) 100%)",
+                    color: "rgba(200, 240, 255, 0.95)",
+                    borderRadius: "20px",
+                    border: "1px solid rgba(150, 220, 255, 0.25)",
+                    textShadow: "0 0 10px rgba(100, 200, 255, 0.5)",
+                  }}
+                >
+                  {word}
+                </span>
+              ))}
             </div>
           </div>
         )}
