@@ -661,64 +661,89 @@ export default function WaterRipplePage() {
       // Draw original video
       waterCtx.drawImage(video, 0, 0)
       
-      // Apply subtle water tint
-      waterCtx.save()
-      waterCtx.globalAlpha = waterOpacity * 0.08
-      waterCtx.fillStyle = "#3090d0"
-      waterCtx.fillRect(0, 0, vw, vh)
-      waterCtx.restore()
+      // Get the image data for pixel manipulation (realistic water refraction)
+      const imageData = waterCtx.getImageData(0, 0, vw, vh)
+      const pixels = imageData.data
       
-      // Draw water ripple rings - concentric circles like real water
-      waterCtx.save()
+      // Apply water refraction/displacement effect
+      const tempCanvas = document.createElement('canvas')
+      tempCanvas.width = vw
+      tempCanvas.height = vh
+      const tempCtx = tempCanvas.getContext('2d')!
+      tempCtx.drawImage(video, 0, 0)
+      const srcData = tempCtx.getImageData(0, 0, vw, vh).data
       
-      for (let sy = 0; sy < simH; sy += 2) {
+      for (let sy = 1; sy < simH - 1; sy++) {
         const row = sy * simW
-        for (let sx = 0; sx < simW; sx += 2) {
+        for (let sx = 1; sx < simW - 1; sx++) {
           const val = curr[row + sx]
           const absVal = Math.abs(val)
           
-          if (absVal > 2) {
-            const px = sx * stepX
-            const py = sy * stepY
+          if (absVal > 0.5) {
+            // Calculate displacement based on wave gradient
+            const dx = (curr[row + sx + 1] - curr[row + sx - 1]) * 8
+            const dy = (curr[(sy + 1) * simW + sx] - curr[(sy - 1) * simW + sx]) * 8
             
-            // Draw multiple concentric rings for water ripple effect
-            const baseRadius = absVal * 3 + 20
-            const alpha = Math.min(absVal / 15, 0.7) * waterOpacity
+            const startX = Math.floor(sx * stepX)
+            const endX = Math.floor((sx + 1) * stepX)
+            const startY = Math.floor(sy * stepY)
+            const endY = Math.floor((sy + 1) * stepY)
             
-            // Outer ring - cyan/blue
-            waterCtx.strokeStyle = `rgba(80, 180, 220, ${alpha * 0.6})`
-            waterCtx.lineWidth = 3
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, baseRadius, 0, Math.PI * 2)
-            waterCtx.stroke()
-            
-            // Middle ring - lighter
-            waterCtx.strokeStyle = `rgba(140, 210, 240, ${alpha * 0.8})`
-            waterCtx.lineWidth = 2
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, baseRadius * 0.65, 0, Math.PI * 2)
-            waterCtx.stroke()
-            
-            // Inner ring - bright highlight
-            waterCtx.strokeStyle = `rgba(200, 235, 255, ${alpha})`
-            waterCtx.lineWidth = 2
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, baseRadius * 0.35, 0, Math.PI * 2)
-            waterCtx.stroke()
-            
-            // Center highlight spot
-            if (val > 0) {
-              const grad = waterCtx.createRadialGradient(px, py, 0, px, py, baseRadius * 0.25)
-              grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.5})`)
-              grad.addColorStop(1, `rgba(180, 220, 255, 0)`)
-              waterCtx.fillStyle = grad
-              waterCtx.beginPath()
-              waterCtx.arc(px, py, baseRadius * 0.25, 0, Math.PI * 2)
-              waterCtx.fill()
+            for (let py = startY; py < endY && py < vh; py++) {
+              for (let px = startX; px < endX && px < vw; px++) {
+                // Sample from displaced position
+                const srcX = Math.max(0, Math.min(vw - 1, Math.floor(px + dx)))
+                const srcY = Math.max(0, Math.min(vh - 1, Math.floor(py + dy)))
+                const srcIdx = (srcY * vw + srcX) * 4
+                const dstIdx = (py * vw + px) * 4
+                
+                // Apply refraction with slight blue tint
+                const intensity = Math.min(absVal / 20, 0.4)
+                pixels[dstIdx] = srcData[srcIdx] * (1 - intensity * 0.1) + 30 * intensity
+                pixels[dstIdx + 1] = srcData[srcIdx + 1] * (1 - intensity * 0.05) + 80 * intensity
+                pixels[dstIdx + 2] = srcData[srcIdx + 2] + 40 * intensity
+              }
             }
           }
         }
       }
+      
+      waterCtx.putImageData(imageData, 0, 0)
+      
+      // Add caustic light patterns
+      waterCtx.save()
+      waterCtx.globalCompositeOperation = 'overlay'
+      
+      for (let sy = 0; sy < simH; sy += 3) {
+        const row = sy * simW
+        for (let sx = 0; sx < simW; sx += 3) {
+          const val = curr[row + sx]
+          const absVal = Math.abs(val)
+          
+          if (absVal > 3) {
+            const px = sx * stepX
+            const py = sy * stepY
+            const alpha = Math.min(absVal / 25, 0.5) * waterOpacity
+            
+            // Caustic light effect
+            const grad = waterCtx.createRadialGradient(px, py, 0, px, py, absVal * 4 + 30)
+            grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.7})`)
+            grad.addColorStop(0.3, `rgba(200, 240, 255, ${alpha * 0.4})`)
+            grad.addColorStop(0.7, `rgba(100, 180, 220, ${alpha * 0.2})`)
+            grad.addColorStop(1, 'rgba(50, 100, 150, 0)')
+            waterCtx.fillStyle = grad
+            waterCtx.beginPath()
+            waterCtx.arc(px, py, absVal * 4 + 30, 0, Math.PI * 2)
+            waterCtx.fill()
+          }
+        }
+      }
+      
+      // Subtle surface shimmer
+      waterCtx.globalCompositeOperation = 'screen'
+      waterCtx.globalAlpha = waterOpacity * 0.05
+      waterCtx.fillStyle = 'rgba(150, 200, 255, 1)'
+      waterCtx.fillRect(0, 0, vw, vh)
       
       waterCtx.restore()
     }
@@ -792,9 +817,17 @@ export default function WaterRipplePage() {
           />
         )}
 
-        {/* Floating AI-generated words - Water Style */}
+        {/* Floating AI-generated words - Pop Art Style */}
         {floatingWords.map((word) => {
-          const shimmer = Math.sin(Date.now() / 500 + word.id) * 0.1
+          const popColors = [
+            { bg: "#FF3B30", stroke: "#000", text: "#FFF" },
+            { bg: "#FFCC00", stroke: "#000", text: "#000" },
+            { bg: "#FF2D92", stroke: "#000", text: "#FFF" },
+            { bg: "#00D4FF", stroke: "#000", text: "#000" },
+            { bg: "#4CD964", stroke: "#000", text: "#000" },
+            { bg: "#FF9500", stroke: "#000", text: "#000" },
+          ]
+          const color = popColors[word.id % popColors.length]
           return (
             <div
               key={word.id}
@@ -802,27 +835,22 @@ export default function WaterRipplePage() {
               style={{
                 left: `${word.x}%`,
                 top: `${word.y}%`,
-                opacity: word.opacity * (0.7 + shimmer),
-                transform: `scale(${word.scale}) rotate(${word.rotation * 0.5}deg) skewX(${Math.sin(word.id) * 3}deg)`,
+                opacity: word.opacity,
+                transform: `scale(${word.scale * 1.2}) rotate(${word.rotation}deg)`,
                 willChange: "transform, opacity, left, top",
               }}
             >
               <span
-                className="font-light italic lowercase tracking-widest"
+                className="font-black uppercase tracking-tight"
                 style={{
-                  fontSize: `${1.4 + word.scale * 0.6}rem`,
-                  color: "transparent",
-                  background: `linear-gradient(180deg, rgba(180, 230, 255, 0.95) 0%, rgba(100, 200, 255, 0.85) 50%, rgba(50, 150, 220, 0.75) 100%)`,
-                  WebkitBackgroundClip: "text",
-                  backgroundClip: "text",
-                  textShadow: `
-                    0 0 30px rgba(100, 200, 255, 0.6),
-                    0 0 60px rgba(50, 150, 255, 0.4),
-                    0 2px 4px rgba(0, 50, 100, 0.3),
-                    0 0 2px rgba(255, 255, 255, 0.8)
-                  `,
-                  filter: `blur(${0.3 + (1 - word.opacity) * 2}px)`,
+                  fontSize: `${1.8 + word.scale}rem`,
+                  color: color.text,
+                  backgroundColor: color.bg,
+                  padding: "4px 12px",
+                  border: `4px solid ${color.stroke}`,
+                  boxShadow: `6px 6px 0px ${color.stroke}`,
                   display: "inline-block",
+                  WebkitTextStroke: `1px ${color.stroke}`,
                 }}
               >
                 {word.text}
@@ -831,39 +859,40 @@ export default function WaterRipplePage() {
           )
         })}
 
-        {/* API Response Display - Water Style */}
+        {/* API Response Display - Pop Art Style */}
         {isRunning && lastApiResponse.length > 0 && (
           <div 
-            className="absolute bottom-4 left-4 z-50 p-4 max-w-sm backdrop-blur-md"
+            className="absolute bottom-4 left-4 z-50 p-4 max-w-sm"
             style={{
-              background: "linear-gradient(135deg, rgba(50, 150, 200, 0.3) 0%, rgba(100, 180, 220, 0.2) 100%)",
-              borderRadius: "16px",
-              border: "1px solid rgba(150, 220, 255, 0.3)",
-              boxShadow: "0 8px 32px rgba(50, 150, 200, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
+              backgroundColor: "#FFF",
+              border: "4px solid #000",
+              boxShadow: "8px 8px 0px #000",
             }}
           >
             <p 
-              className="text-xs uppercase tracking-widest mb-3 font-light"
-              style={{ color: "rgba(180, 230, 255, 0.9)" }}
+              className="text-xs uppercase tracking-wider mb-3 font-black"
+              style={{ color: "#FF2D92" }}
             >
-              ripples
+              AI Keywords
             </p>
             <div className="flex flex-wrap gap-2">
-              {lastApiResponse.map((word, i) => (
-                <span 
-                  key={i} 
-                  className="text-sm font-light italic lowercase px-3 py-1"
-                  style={{
-                    background: "linear-gradient(180deg, rgba(100, 200, 255, 0.25) 0%, rgba(50, 150, 200, 0.15) 100%)",
-                    color: "rgba(200, 240, 255, 0.95)",
-                    borderRadius: "20px",
-                    border: "1px solid rgba(150, 220, 255, 0.25)",
-                    textShadow: "0 0 10px rgba(100, 200, 255, 0.5)",
-                  }}
-                >
-                  {word}
-                </span>
-              ))}
+              {lastApiResponse.map((word, i) => {
+                const colors = ["#FF3B30", "#FFCC00", "#FF2D92", "#00D4FF", "#4CD964"]
+                return (
+                  <span 
+                    key={i} 
+                    className="text-sm font-black uppercase px-2 py-1"
+                    style={{
+                      backgroundColor: colors[i % colors.length],
+                      color: i === 1 || i === 3 || i === 4 ? "#000" : "#FFF",
+                      border: "2px solid #000",
+                      boxShadow: "3px 3px 0px #000",
+                    }}
+                  >
+                    {word}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
