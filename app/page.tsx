@@ -734,18 +734,18 @@ export default function WaterRipplePage() {
           rippleData={rippleData}
           rippleWidth={rippleDimensions.width}
           rippleHeight={rippleDimensions.height}
-          refractionStrength={rippleStrength / 500}
+          refractionStrength={rippleStrength / 150}
           waterOpacity={waterOpacity}
           isRunning={isRunning}
         />
         
-        {/* Water surface overlay effect */}
+        {/* Water surface blue tint overlay */}
         {isRunning && (
           <div 
-            className="absolute inset-0 pointer-events-none"
+            className="absolute inset-0 pointer-events-none z-20"
             style={{
-              background: "linear-gradient(180deg, rgba(100, 200, 255, 0.05) 0%, rgba(50, 150, 255, 0.1) 100%)",
-              mixBlendMode: "overlay"
+              background: "linear-gradient(180deg, rgba(30, 100, 180, 0.08) 0%, rgba(20, 80, 150, 0.12) 100%)",
+              mixBlendMode: "multiply"
             }}
           />
         )}

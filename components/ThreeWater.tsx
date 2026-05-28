@@ -4,7 +4,7 @@ import { useRef, useMemo, useEffect, useState } from "react"
 import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import * as THREE from "three"
 
-// Water shader with realistic refraction and ripples
+// Realistic water shader with refraction, caustics, and wave displacement
 const waterVertexShader = `
   uniform float uTime;
   uniform sampler2D uRippleMap;
@@ -14,25 +14,32 @@ const waterVertexShader = `
   varying vec3 vNormal;
   varying vec3 vViewPosition;
   varying float vDisplacement;
+  varying vec2 vRippleGradient;
   
   void main() {
     vUv = uv;
     
-    // Sample ripple map for displacement
+    // Sample ripple map for displacement with larger sample area
     vec4 ripple = texture2D(uRippleMap, uv);
     float displacement = ripple.r * uRippleStrength;
     vDisplacement = displacement;
     
-    // Calculate normal from ripple gradient
-    float delta = 0.01;
-    float dx = texture2D(uRippleMap, uv + vec2(delta, 0.0)).r - texture2D(uRippleMap, uv - vec2(delta, 0.0)).r;
-    float dy = texture2D(uRippleMap, uv + vec2(0.0, delta)).r - texture2D(uRippleMap, uv - vec2(0.0, delta)).r;
+    // Calculate normal from ripple gradient with wider sampling
+    float delta = 0.02;
+    float rippleLeft = texture2D(uRippleMap, uv + vec2(-delta, 0.0)).r;
+    float rippleRight = texture2D(uRippleMap, uv + vec2(delta, 0.0)).r;
+    float rippleUp = texture2D(uRippleMap, uv + vec2(0.0, delta)).r;
+    float rippleDown = texture2D(uRippleMap, uv + vec2(0.0, -delta)).r;
     
-    vec3 normal = normalize(vec3(-dx * uRippleStrength * 2.0, -dy * uRippleStrength * 2.0, 1.0));
+    float dx = rippleRight - rippleLeft;
+    float dy = rippleUp - rippleDown;
+    vRippleGradient = vec2(dx, dy);
+    
+    vec3 normal = normalize(vec3(-dx * uRippleStrength * 4.0, -dy * uRippleStrength * 4.0, 1.0));
     vNormal = normalMatrix * normal;
     
     vec3 pos = position;
-    pos.z += displacement * 0.1;
+    pos.z += displacement * 0.15;
     
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
     vViewPosition = -mvPosition.xyz;
@@ -52,45 +59,98 @@ const waterFragmentShader = `
   varying vec3 vNormal;
   varying vec3 vViewPosition;
   varying float vDisplacement;
+  varying vec2 vRippleGradient;
+  
+  // Improved noise function for caustics
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+  
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  }
+  
+  float caustics(vec2 uv, float time) {
+    float c = 0.0;
+    vec2 p = uv * 8.0;
+    c += noise(p + time * 0.5) * 0.5;
+    c += noise(p * 2.0 - time * 0.3) * 0.25;
+    c += noise(p * 4.0 + time * 0.7) * 0.125;
+    return c;
+  }
   
   void main() {
-    // Calculate refraction offset based on ripple normal
-    vec4 ripple = texture2D(uRippleMap, vUv);
+    // Calculate refraction offset based on ripple gradient - increased range
+    vec2 refractOffset = vRippleGradient * uRefractionStrength * 3.0;
     
-    float delta = 0.005;
-    float dx = texture2D(uRippleMap, vUv + vec2(delta, 0.0)).r - texture2D(uRippleMap, vUv - vec2(delta, 0.0)).r;
-    float dy = texture2D(uRippleMap, vUv + vec2(0.0, delta)).r - texture2D(uRippleMap, vUv - vec2(0.0, delta)).r;
+    // Add subtle animated water movement
+    float waveTime = uTime * 0.5;
+    vec2 waveOffset = vec2(
+      sin(vUv.y * 10.0 + waveTime) * 0.002,
+      cos(vUv.x * 10.0 + waveTime) * 0.002
+    );
     
-    vec2 refractOffset = vec2(dx, dy) * uRefractionStrength;
-    vec2 refractedUv = vUv + refractOffset;
-    refractedUv = clamp(refractedUv, 0.0, 1.0);
+    vec2 refractedUv = vUv + refractOffset + waveOffset;
+    refractedUv = clamp(refractedUv, 0.001, 0.999);
     
     // Sample video with refraction
     vec4 videoColor = texture2D(uVideoTexture, refractedUv);
     
-    // Fresnel effect for edge reflections
+    // Fresnel effect for realistic water surface
     vec3 viewDir = normalize(vViewPosition);
     vec3 normal = normalize(vNormal);
-    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0);
+    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 4.0);
     
-    // Caustic/highlight effect based on ripple intensity
-    float rippleIntensity = ripple.r;
-    vec3 caustic = vec3(1.0, 1.0, 1.0) * rippleIntensity * 0.4;
+    // Ripple intensity for effects
+    float rippleIntensity = length(vRippleGradient) * 10.0;
+    rippleIntensity = clamp(rippleIntensity, 0.0, 1.0);
     
-    // Water tint
-    vec3 waterTint = mix(videoColor.rgb, uWaterColor, uWaterOpacity * 0.15);
+    // Caustic light patterns
+    float causticPattern = caustics(vUv + refractOffset * 0.5, uTime);
+    vec3 causticColor = vec3(0.7, 0.85, 1.0) * causticPattern * rippleIntensity * 0.6;
+    
+    // Water color with blue hue - blend with video
+    vec3 deepWaterColor = vec3(0.1, 0.3, 0.5);
+    vec3 shallowWaterColor = vec3(0.2, 0.5, 0.7);
+    vec3 waterTint = mix(shallowWaterColor, deepWaterColor, fresnel);
+    
+    // Blend video with water tint - keep video visible with blue overlay
+    float blueIntensity = 0.15 + rippleIntensity * 0.1;
+    vec3 tintedVideo = mix(videoColor.rgb, videoColor.rgb * waterTint * 1.5, blueIntensity);
+    
+    // Add overall blue hue
+    tintedVideo = tintedVideo * vec3(0.9, 0.95, 1.1);
     
     // Add caustic highlights
-    waterTint += caustic;
+    tintedVideo += causticColor;
     
-    // Add subtle fresnel reflection
-    waterTint = mix(waterTint, uWaterColor + vec3(0.3), fresnel * 0.3 * uWaterOpacity);
+    // Specular highlights on ripples - bright spots
+    float specularIntensity = pow(rippleIntensity, 1.5) * 0.8;
+    vec3 specular = vec3(1.0, 1.0, 1.0) * specularIntensity;
+    tintedVideo += specular;
     
-    // Specular highlights on ripples
-    float specular = pow(max(rippleIntensity, 0.0), 2.0) * 0.5;
-    waterTint += vec3(specular);
+    // Edge foam/highlight effect on strong ripples
+    float foam = smoothstep(0.4, 0.8, rippleIntensity) * 0.3;
+    tintedVideo = mix(tintedVideo, vec3(0.9, 0.95, 1.0), foam);
     
-    gl_FragColor = vec4(waterTint, 1.0);
+    // Subtle fresnel reflection of sky color
+    vec3 skyReflection = vec3(0.6, 0.75, 0.9);
+    tintedVideo = mix(tintedVideo, skyReflection, fresnel * 0.25 * uWaterOpacity);
+    
+    // Subtle vignette for depth
+    float vignette = 1.0 - length(vUv - 0.5) * 0.3;
+    tintedVideo *= vignette;
+    
+    gl_FragColor = vec4(tintedVideo, 1.0);
   }
 `
 
@@ -135,7 +195,7 @@ function WaterMesh({
     }
   }, [videoElement])
   
-  // Create ripple data texture
+  // Create ripple data texture with linear filtering for smoother ripples
   const rippleTexture = useMemo(() => {
     const texture = new THREE.DataTexture(
       new Float32Array(rippleWidth * rippleHeight * 4),
@@ -144,6 +204,10 @@ function WaterMesh({
       THREE.RGBAFormat,
       THREE.FloatType
     )
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.wrapS = THREE.ClampToEdgeWrapping
+    texture.wrapT = THREE.ClampToEdgeWrapping
     texture.needsUpdate = true
     return texture
   }, [rippleWidth, rippleHeight])
@@ -153,9 +217,9 @@ function WaterMesh({
     uTime: { value: 0 },
     uVideoTexture: { value: null as THREE.VideoTexture | null },
     uRippleMap: { value: rippleTexture },
-    uRippleStrength: { value: 0.5 },
+    uRippleStrength: { value: 1.2 },
     uRefractionStrength: { value: refractionStrength },
-    uWaterColor: { value: new THREE.Color(0.2, 0.5, 0.7) },
+    uWaterColor: { value: new THREE.Color(0.15, 0.4, 0.6) },
     uWaterOpacity: { value: waterOpacity }
   }), [rippleTexture, refractionStrength, waterOpacity])
   
@@ -167,13 +231,14 @@ function WaterMesh({
     }
   }, [videoTexture])
   
-  // Update ripple texture from simulation data
+  // Update ripple texture from simulation data with larger range
   useEffect(() => {
     if (!rippleData || rippleData.length === 0) return
     
     const data = new Float32Array(rippleWidth * rippleHeight * 4)
     for (let i = 0; i < rippleWidth * rippleHeight; i++) {
-      const val = Math.abs(rippleData[i]) / 50 // Normalize
+      // Increased normalization range and added smoothing
+      const val = Math.min(Math.abs(rippleData[i]) / 25, 1.0)
       data[i * 4] = val
       data[i * 4 + 1] = val
       data[i * 4 + 2] = val
@@ -238,7 +303,7 @@ export default function ThreeWater({
   rippleData, 
   rippleWidth, 
   rippleHeight,
-  refractionStrength = 0.08,
+  refractionStrength = 0.15,
   waterOpacity = 0.95,
   isRunning 
 }: ThreeWaterProps) {
