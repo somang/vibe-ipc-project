@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { Slider } from "@/components/ui/slider"
 import { Waves, CameraOff, Settings2, Volume2, VolumeX } from "lucide-react"
 import * as Tone from "tone"
+import dynamic from "next/dynamic"
+
+const ThreeWater = dynamic(() => import("@/components/ThreeWater"), { ssr: false })
 
 declare global {
   interface Window {
@@ -118,6 +121,9 @@ export default function WaterRipplePage() {
   const streamRef = useRef<MediaStream | null>(null)
   const prevFrameRef = useRef<any>(null)
   const waterSimRef = useRef<WaterSimulation | null>(null)
+  const [rippleData, setRippleData] = useState<Float32Array>(new Float32Array(0))
+  const [rippleDimensions, setRippleDimensions] = useState({ width: 80, height: 60 })
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null)
   const frameCountRef = useRef(0)
   
   // Tone.js audio refs - Music for Airports style
@@ -491,7 +497,11 @@ export default function WaterRipplePage() {
   // Initialize water simulation at low resolution for performance
   const w = videoRef.current!.videoWidth
   const h = videoRef.current!.videoHeight
-  waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
+  const simW = Math.floor(w / 8)
+  const simH = Math.floor(h / 8)
+  waterSimRef.current = new WaterSimulation(simW, simH)
+  setRippleDimensions({ width: simW, height: simH })
+  setVideoElement(videoRef.current)
   setIsRunning(true)
   // Audio will start when motion is first detected
   }).catch((err) => {
@@ -538,6 +548,7 @@ export default function WaterRipplePage() {
   setIsRunning(false)
   setMotionAreas(0)
   setFloatingWords([])
+  setVideoElement(null)
   }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
@@ -648,104 +659,15 @@ export default function WaterRipplePage() {
       }
     }
 
-    // Always update water simulation and render
+    // Always update water simulation and pass data to Three.js
     if (waterSim) {
       waterSim.update()
       
-      const simW = waterSim.width
-      const simH = waterSim.height
-      const curr = waterSim.current
-      const stepX = vw / simW
-      const stepY = vh / simH
+      // Update ripple data for Three.js water shader
+      setRippleData(new Float32Array(waterSim.current))
       
-      // Draw original video
+      // Draw original video to canvas (fallback/hidden)
       waterCtx.drawImage(video, 0, 0)
-      
-      // Get the image data for pixel manipulation (realistic water refraction)
-      const imageData = waterCtx.getImageData(0, 0, vw, vh)
-      const pixels = imageData.data
-      
-      // Apply water refraction/displacement effect
-      const tempCanvas = document.createElement('canvas')
-      tempCanvas.width = vw
-      tempCanvas.height = vh
-      const tempCtx = tempCanvas.getContext('2d')!
-      tempCtx.drawImage(video, 0, 0)
-      const srcData = tempCtx.getImageData(0, 0, vw, vh).data
-      
-      for (let sy = 1; sy < simH - 1; sy++) {
-        const row = sy * simW
-        for (let sx = 1; sx < simW - 1; sx++) {
-          const val = curr[row + sx]
-          const absVal = Math.abs(val)
-          
-          if (absVal > 0.5) {
-            // Calculate displacement based on wave gradient
-            const dx = (curr[row + sx + 1] - curr[row + sx - 1]) * 8
-            const dy = (curr[(sy + 1) * simW + sx] - curr[(sy - 1) * simW + sx]) * 8
-            
-            const startX = Math.floor(sx * stepX)
-            const endX = Math.floor((sx + 1) * stepX)
-            const startY = Math.floor(sy * stepY)
-            const endY = Math.floor((sy + 1) * stepY)
-            
-            for (let py = startY; py < endY && py < vh; py++) {
-              for (let px = startX; px < endX && px < vw; px++) {
-                // Sample from displaced position
-                const srcX = Math.max(0, Math.min(vw - 1, Math.floor(px + dx)))
-                const srcY = Math.max(0, Math.min(vh - 1, Math.floor(py + dy)))
-                const srcIdx = (srcY * vw + srcX) * 4
-                const dstIdx = (py * vw + px) * 4
-                
-                // Apply refraction with slight blue tint
-                const intensity = Math.min(absVal / 20, 0.4)
-                pixels[dstIdx] = srcData[srcIdx] * (1 - intensity * 0.1) + 30 * intensity
-                pixels[dstIdx + 1] = srcData[srcIdx + 1] * (1 - intensity * 0.05) + 80 * intensity
-                pixels[dstIdx + 2] = srcData[srcIdx + 2] + 40 * intensity
-              }
-            }
-          }
-        }
-      }
-      
-      waterCtx.putImageData(imageData, 0, 0)
-      
-      // Add caustic light patterns
-      waterCtx.save()
-      waterCtx.globalCompositeOperation = 'overlay'
-      
-      for (let sy = 0; sy < simH; sy += 3) {
-        const row = sy * simW
-        for (let sx = 0; sx < simW; sx += 3) {
-          const val = curr[row + sx]
-          const absVal = Math.abs(val)
-          
-          if (absVal > 3) {
-            const px = sx * stepX
-            const py = sy * stepY
-            const alpha = Math.min(absVal / 25, 0.5) * waterOpacity
-            
-            // Caustic light effect
-            const grad = waterCtx.createRadialGradient(px, py, 0, px, py, absVal * 4 + 30)
-            grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.7})`)
-            grad.addColorStop(0.3, `rgba(200, 240, 255, ${alpha * 0.4})`)
-            grad.addColorStop(0.7, `rgba(100, 180, 220, ${alpha * 0.2})`)
-            grad.addColorStop(1, 'rgba(50, 100, 150, 0)')
-            waterCtx.fillStyle = grad
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, absVal * 4 + 30, 0, Math.PI * 2)
-            waterCtx.fill()
-          }
-        }
-      }
-      
-      // Subtle surface shimmer
-      waterCtx.globalCompositeOperation = 'screen'
-      waterCtx.globalAlpha = waterOpacity * 0.05
-      waterCtx.fillStyle = 'rgba(150, 200, 255, 1)'
-      waterCtx.fillRect(0, 0, vw, vh)
-      
-      waterCtx.restore()
     }
 
     animationRef.current = requestAnimationFrame(detectMotionAndRipple)
@@ -803,7 +725,18 @@ export default function WaterRipplePage() {
         <canvas
           ref={waterCanvasRef}
           className="absolute inset-0 h-full w-full object-cover"
-          style={{ display: isRunning ? "block" : "none", transform: "scaleX(-1)" }}
+          style={{ display: "none" }}
+        />
+        
+        {/* Three.js Water Visualization */}
+        <ThreeWater
+          videoElement={videoElement}
+          rippleData={rippleData}
+          rippleWidth={rippleDimensions.width}
+          rippleHeight={rippleDimensions.height}
+          refractionStrength={rippleStrength / 500}
+          waterOpacity={waterOpacity}
+          isRunning={isRunning}
         />
         
         {/* Water surface overlay effect */}
