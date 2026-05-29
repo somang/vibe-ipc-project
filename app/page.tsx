@@ -398,19 +398,6 @@ export default function WaterRipplePage() {
     }
   }, [isRunning])
 
-  // Text fade animation handled by CSS transitions
-            y: word.y + word.velocityY * 0.5,
-            opacity: word.opacity - 0.002,
-            velocityY: word.velocityY - 0.005, // float upward slowly
-          }))
-          .filter(word => word.opacity > 0)
-      })
-    }
-    
-    const interval = setInterval(animateWords, 50)
-    return () => clearInterval(interval)
-  }, [])
-
   // Start/stop screenshot interval when running
   useEffect(() => {
     if (isRunning) {
