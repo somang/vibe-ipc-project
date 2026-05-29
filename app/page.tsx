@@ -101,10 +101,21 @@ export default function WaterRipplePage() {
   const [splashVolume, setSplashVolume] = useState(0.3)
   const [ambientVolume, setAmbientVolume] = useState(0.2)
   
-  // Water consciousness text from AI analysis
-  const [waterText, setWaterText] = useState<string>("")
-  const [textOpacity, setTextOpacity] = useState(0)
+  // Floating words from AI analysis
+  const [floatingWords, setFloatingWords] = useState<Array<{
+    id: number
+    text: string
+    x: number
+    y: number
+    opacity: number
+    scale: number
+    rotation: number
+    velocityX: number
+    velocityY: number
+  }>>([])
   const screenshotIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const wordIdCounterRef = useRef(0)
+  const [lastApiResponse, setLastApiResponse] = useState<string[]>([])
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
@@ -354,6 +365,8 @@ export default function WaterRipplePage() {
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !isRunning) return
     
+    console.log("[v0] Capturing screenshot for AI analysis...")
+    
     const video = videoRef.current
     const tempCanvas = document.createElement("canvas")
     tempCanvas.width = video.videoWidth
@@ -367,6 +380,7 @@ export default function WaterRipplePage() {
     const base64 = tempCanvas.toDataURL("image/jpeg", 0.7).split(",")[1]
     
     try {
+      console.log("[v0] Sending to API...")
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -374,29 +388,61 @@ export default function WaterRipplePage() {
       })
       
       if (!response.ok) {
+        console.error("[v0] API response not ok:", response.status)
         throw new Error("API request failed")
       }
       
       const data = await response.json()
-      const text: string = data.text || ""
+      console.log("[v0] API response data:", data)
+      const words: string[] = data.words || []
       
-      if (!text) {
+      if (words.length === 0) {
+        console.log("[v0] No words returned from API")
         return
       }
       
-      // Fade in the new text
-      setTextOpacity(0)
-      setWaterText(text)
+      console.log("[v0] Creating floating words:", words)
+      setLastApiResponse(words)
       
-      // Animate fade in
-      setTimeout(() => setTextOpacity(1), 100)
+      // Create floating word objects with random positions and animations
+      const newWords = words.map((text: string) => ({
+        id: wordIdCounterRef.current++,
+        text,
+        x: 10 + Math.random() * 80, // percentage
+        y: 10 + Math.random() * 80,
+        opacity: 1,
+        scale: 0.8 + Math.random() * 0.6,
+        rotation: -15 + Math.random() * 30,
+        velocityX: -0.3 + Math.random() * 0.6,
+        velocityY: -0.5 + Math.random() * 0.3,
+      }))
       
-      // Fade out after 8 seconds
-      setTimeout(() => setTextOpacity(0), 8000)
+      setFloatingWords(prev => [...prev, ...newWords])
     } catch (err) {
       console.error("[v0] Failed to analyze screenshot:", err)
     }
   }, [isRunning])
+
+  // Animate floating words - fade out and drift
+  useEffect(() => {
+    const animateWords = () => {
+      setFloatingWords(prev => {
+        if (prev.length === 0) return prev
+        return prev
+          .map(word => ({
+            ...word,
+            x: word.x + word.velocityX * 0.5,
+            y: word.y + word.velocityY * 0.5,
+            opacity: word.opacity - 0.002,
+            velocityY: word.velocityY - 0.005, // float upward slowly
+          }))
+          .filter(word => word.opacity > 0)
+      })
+    }
+    
+    const interval = setInterval(animateWords, 50)
+    return () => clearInterval(interval)
+  }, [])
 
   // Start/stop screenshot interval when running
   useEffect(() => {
@@ -421,8 +467,7 @@ export default function WaterRipplePage() {
       if (screenshotIntervalRef.current) {
         clearInterval(screenshotIntervalRef.current)
       }
-      setWaterText("")
-      setTextOpacity(0)
+      setFloatingWords([])
     }
   }, [isRunning, captureAndAnalyze])
 
@@ -502,8 +547,7 @@ export default function WaterRipplePage() {
   ambientStartedRef.current = false
   setIsRunning(false)
   setMotionAreas(0)
-  setWaterText("")
-  setTextOpacity(0)
+  setFloatingWords([])
   setVideoElement(null)
   }, [stopAmbientMusic])
 
@@ -706,33 +750,82 @@ export default function WaterRipplePage() {
           />
         )}
 
-        {/* Water Consciousness Text - Center Screen */}
-        {isRunning && waterText && (
-          <div 
-            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none px-8"
-            style={{
-              opacity: textOpacity,
-              transition: "opacity 1.5s ease-in-out"
-            }}
-          >
-            <div 
-              className="max-w-2xl text-left"
+        {/* Floating AI-generated words - Pop Art Style */}
+        {floatingWords.map((word) => {
+          const popColors = [
+            { bg: "#FF3B30", stroke: "#000", text: "#FFF" },
+            { bg: "#FFCC00", stroke: "#000", text: "#000" },
+            { bg: "#FF2D92", stroke: "#000", text: "#FFF" },
+            { bg: "#00D4FF", stroke: "#000", text: "#000" },
+            { bg: "#4CD964", stroke: "#000", text: "#000" },
+            { bg: "#FF9500", stroke: "#000", text: "#000" },
+          ]
+          const color = popColors[word.id % popColors.length]
+          return (
+            <div
+              key={word.id}
+              className="absolute pointer-events-none select-none z-50"
               style={{
-                backgroundColor: "rgba(0, 0, 0, 0.75)",
-                padding: "20px 32px",
-                borderRadius: "4px",
+                left: `${word.x}%`,
+                top: `${word.y}%`,
+                opacity: word.opacity,
+                transform: `scale(${word.scale * 1.2}) rotate(${word.rotation}deg)`,
+                willChange: "transform, opacity, left, top",
               }}
             >
-              <p 
-                className="text-white font-sans leading-relaxed"
+              <span
+                className="font-black uppercase tracking-tight"
                 style={{
-                  fontSize: "clamp(1.1rem, 2.5vw, 1.5rem)",
-                  textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
-                  letterSpacing: "0.01em",
+                  fontSize: `${1.8 + word.scale}rem`,
+                  color: color.text,
+                  backgroundColor: color.bg,
+                  padding: "4px 12px",
+                  border: `4px solid ${color.stroke}`,
+                  boxShadow: `6px 6px 0px ${color.stroke}`,
+                  display: "inline-block",
+                  WebkitTextStroke: `1px ${color.stroke}`,
                 }}
               >
-                {waterText}
-              </p>
+                {word.text}
+              </span>
+            </div>
+          )
+        })}
+
+        {/* API Response Display - Pop Art Style */}
+        {isRunning && lastApiResponse.length > 0 && (
+          <div 
+            className="absolute bottom-4 left-4 z-50 p-4 max-w-sm"
+            style={{
+              backgroundColor: "#FFF",
+              border: "4px solid #000",
+              boxShadow: "8px 8px 0px #000",
+            }}
+          >
+            <p 
+              className="text-xs uppercase tracking-wider mb-3 font-black"
+              style={{ color: "#FF2D92" }}
+            >
+              AI Keywords
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {lastApiResponse.map((word, i) => {
+                const colors = ["#FF3B30", "#FFCC00", "#FF2D92", "#00D4FF", "#4CD964"]
+                return (
+                  <span 
+                    key={i} 
+                    className="text-sm font-black uppercase px-2 py-1"
+                    style={{
+                      backgroundColor: colors[i % colors.length],
+                      color: i === 1 || i === 3 || i === 4 ? "#000" : "#FFF",
+                      border: "2px solid #000",
+                      boxShadow: "3px 3px 0px #000",
+                    }}
+                  >
+                    {word}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
