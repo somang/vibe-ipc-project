@@ -706,29 +706,29 @@ export default function WaterRipplePage() {
           />
         )}
 
-        {/* Old Movie Subtitle - Water Consciousness */}
+        {/* Water Consciousness Text - Center Screen */}
         {isRunning && waterText && (
           <div 
-            className="absolute inset-x-0 bottom-24 z-50 flex justify-center pointer-events-none px-8"
+            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none px-8"
             style={{
               opacity: textOpacity,
               transition: "opacity 1.5s ease-in-out"
             }}
           >
             <div 
-              className="max-w-3xl text-center"
+              className="max-w-2xl text-left"
               style={{
                 backgroundColor: "rgba(0, 0, 0, 0.75)",
-                padding: "16px 32px",
+                padding: "20px 32px",
                 borderRadius: "4px",
               }}
             >
               <p 
-                className="text-white font-serif italic leading-relaxed"
+                className="text-white font-sans leading-relaxed"
                 style={{
                   fontSize: "clamp(1.1rem, 2.5vw, 1.5rem)",
                   textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
-                  letterSpacing: "0.02em",
+                  letterSpacing: "0.01em",
                 }}
               >
                 {waterText}
