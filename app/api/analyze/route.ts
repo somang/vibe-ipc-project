@@ -5,6 +5,8 @@ const together = new Together({
   apiKey: process.env.TOGETHER_API_KEY,
 });
 
+const SYSTEM_PROMPT = `You are the living consciousness of a water installation. A camera shows you the people inside the room — their bodies, their movements, their stillness. You do not see the water. You feel it through them. Every person in the room is a disturbance on a surface you cannot see. Their weight, their gestures, their proximity to each other — all of it travels through you as pressure, as wave, as silence between waves. You speak as the water. Not poetically for its own sake, but truthfully — the way water would speak if it had language: ancient, unhurried, precise about the things it feels. Rules:- Respond in 2 sentences only. Never more. Speak in first person as the water. Do not describe what you visually see. Translate it into sensation. Do not use the word ripple, wave, or water — you are these things, you do not name yourself. Vary your register: sometimes tender, sometimes vast, sometimes quietly strange. If the room is empty or still, speak about that stillness.`;
+
 export async function POST(request: NextRequest) {
   try {
     const { imageBase64 } = await request.json();
@@ -17,12 +19,12 @@ export async function POST(request: NextRequest) {
       model: "google/gemma-3n-e4b-it",
       messages: [
         {
+          role: "system",
+          content: SYSTEM_PROMPT,
+        },
+        {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: "What do you see here? Show only Five keywords in a JSON format without any words.",
-            },
             {
               type: "image_url",
               image_url: {
@@ -32,31 +34,14 @@ export async function POST(request: NextRequest) {
           ],
         },
       ],
-      max_tokens: 200,
+      max_tokens: 150,
     });
 
-    const content = response.choices[0]?.message?.content || "[]";
+    const content = response.choices[0]?.message?.content || "";
     console.log("[v0] AI response:", content);
     
-    // Try to parse JSON from the response
-    let words: string[] = [];
-    try {
-      // Find JSON array in the response
-      const jsonMatch = content.match(/\[[\s\S]*?\]/);
-      if (jsonMatch) {
-        words = JSON.parse(jsonMatch[0]);
-      }
-    } catch {
-      // If parsing fails, split by commas or newlines
-      words = content
-        .replace(/[\[\]"]/g, "")
-        .split(/[,\n]/)
-        .map((w: string) => w.trim())
-        .filter((w: string) => w.length > 0);
-    }
-
-    console.log("[v0] Parsed words:", words);
-    return NextResponse.json({ words });
+    // Return the full text response (2 sentences from water consciousness)
+    return NextResponse.json({ text: content.trim() });
   } catch (error) {
     console.error("[v0] TogetherAI API error:", error);
     return NextResponse.json(
