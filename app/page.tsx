@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { Slider } from "@/components/ui/slider"
 import { Waves, CameraOff, Settings2, Volume2, VolumeX } from "lucide-react"
 import * as Tone from "tone"
+import dynamic from "next/dynamic"
+
+const ThreeWater = dynamic(() => import("@/components/ThreeWater"), { ssr: false })
 
 declare global {
   interface Window {
@@ -98,26 +101,18 @@ export default function WaterRipplePage() {
   const [splashVolume, setSplashVolume] = useState(0.3)
   const [ambientVolume, setAmbientVolume] = useState(0.2)
   
-  // Floating words from AI analysis
-  const [floatingWords, setFloatingWords] = useState<Array<{
-    id: number
-    text: string
-    x: number
-    y: number
-    opacity: number
-    scale: number
-    rotation: number
-    velocityX: number
-    velocityY: number
-  }>>([])
+  // Water consciousness text from AI analysis
+  const [waterText, setWaterText] = useState<string>("")
+  const [textOpacity, setTextOpacity] = useState(0)
   const screenshotIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const wordIdCounterRef = useRef(0)
-  const [lastApiResponse, setLastApiResponse] = useState<string[]>([])
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
   const prevFrameRef = useRef<any>(null)
   const waterSimRef = useRef<WaterSimulation | null>(null)
+  const [rippleData, setRippleData] = useState<Float32Array>(new Float32Array(0))
+  const [rippleDimensions, setRippleDimensions] = useState({ width: 80, height: 60 })
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null)
   const frameCountRef = useRef(0)
   
   // Tone.js audio refs - Music for Airports style
@@ -359,8 +354,6 @@ export default function WaterRipplePage() {
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !isRunning) return
     
-    console.log("[v0] Capturing screenshot for AI analysis...")
-    
     const video = videoRef.current
     const tempCanvas = document.createElement("canvas")
     tempCanvas.width = video.videoWidth
@@ -374,7 +367,6 @@ export default function WaterRipplePage() {
     const base64 = tempCanvas.toDataURL("image/jpeg", 0.7).split(",")[1]
     
     try {
-      console.log("[v0] Sending to API...")
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -382,61 +374,29 @@ export default function WaterRipplePage() {
       })
       
       if (!response.ok) {
-        console.error("[v0] API response not ok:", response.status)
         throw new Error("API request failed")
       }
       
       const data = await response.json()
-      console.log("[v0] API response data:", data)
-      const words: string[] = data.words || []
+      const text: string = data.text || ""
       
-      if (words.length === 0) {
-        console.log("[v0] No words returned from API")
+      if (!text) {
         return
       }
       
-      console.log("[v0] Creating floating words:", words)
-      setLastApiResponse(words)
+      // Fade in the new text
+      setTextOpacity(0)
+      setWaterText(text)
       
-      // Create floating word objects with random positions and animations
-      const newWords = words.map((text: string) => ({
-        id: wordIdCounterRef.current++,
-        text,
-        x: 10 + Math.random() * 80, // percentage
-        y: 10 + Math.random() * 80,
-        opacity: 1,
-        scale: 0.8 + Math.random() * 0.6,
-        rotation: -15 + Math.random() * 30,
-        velocityX: -0.3 + Math.random() * 0.6,
-        velocityY: -0.5 + Math.random() * 0.3,
-      }))
+      // Animate fade in
+      setTimeout(() => setTextOpacity(1), 100)
       
-      setFloatingWords(prev => [...prev, ...newWords])
+      // Fade out after 8 seconds
+      setTimeout(() => setTextOpacity(0), 8000)
     } catch (err) {
       console.error("[v0] Failed to analyze screenshot:", err)
     }
   }, [isRunning])
-
-  // Animate floating words - fade out and drift
-  useEffect(() => {
-    const animateWords = () => {
-      setFloatingWords(prev => {
-        if (prev.length === 0) return prev
-        return prev
-          .map(word => ({
-            ...word,
-            x: word.x + word.velocityX * 0.5,
-            y: word.y + word.velocityY * 0.5,
-            opacity: word.opacity - 0.002,
-            velocityY: word.velocityY - 0.005, // float upward slowly
-          }))
-          .filter(word => word.opacity > 0)
-      })
-    }
-    
-    const interval = setInterval(animateWords, 50)
-    return () => clearInterval(interval)
-  }, [])
 
   // Start/stop screenshot interval when running
   useEffect(() => {
@@ -461,7 +421,8 @@ export default function WaterRipplePage() {
       if (screenshotIntervalRef.current) {
         clearInterval(screenshotIntervalRef.current)
       }
-      setFloatingWords([])
+      setWaterText("")
+      setTextOpacity(0)
     }
   }, [isRunning, captureAndAnalyze])
 
@@ -491,7 +452,11 @@ export default function WaterRipplePage() {
   // Initialize water simulation at low resolution for performance
   const w = videoRef.current!.videoWidth
   const h = videoRef.current!.videoHeight
-  waterSimRef.current = new WaterSimulation(Math.floor(w / 8), Math.floor(h / 8))
+  const simW = Math.floor(w / 8)
+  const simH = Math.floor(h / 8)
+  waterSimRef.current = new WaterSimulation(simW, simH)
+  setRippleDimensions({ width: simW, height: simH })
+  setVideoElement(videoRef.current)
   setIsRunning(true)
   // Audio will start when motion is first detected
   }).catch((err) => {
@@ -537,7 +502,9 @@ export default function WaterRipplePage() {
   ambientStartedRef.current = false
   setIsRunning(false)
   setMotionAreas(0)
-  setFloatingWords([])
+  setWaterText("")
+  setTextOpacity(0)
+  setVideoElement(null)
   }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
@@ -648,79 +615,15 @@ export default function WaterRipplePage() {
       }
     }
 
-    // Always update water simulation and render
+    // Always update water simulation and pass data to Three.js
     if (waterSim) {
       waterSim.update()
       
-      const simW = waterSim.width
-      const simH = waterSim.height
-      const curr = waterSim.current
-      const stepX = vw / simW
-      const stepY = vh / simH
+      // Update ripple data for Three.js water shader
+      setRippleData(new Float32Array(waterSim.current))
       
-      // Draw original video
+      // Draw original video to canvas (fallback/hidden)
       waterCtx.drawImage(video, 0, 0)
-      
-      // Apply subtle water tint
-      waterCtx.save()
-      waterCtx.globalAlpha = waterOpacity * 0.08
-      waterCtx.fillStyle = "#3090d0"
-      waterCtx.fillRect(0, 0, vw, vh)
-      waterCtx.restore()
-      
-      // Draw water ripple rings - concentric circles like real water
-      waterCtx.save()
-      
-      for (let sy = 0; sy < simH; sy += 2) {
-        const row = sy * simW
-        for (let sx = 0; sx < simW; sx += 2) {
-          const val = curr[row + sx]
-          const absVal = Math.abs(val)
-          
-          if (absVal > 2) {
-            const px = sx * stepX
-            const py = sy * stepY
-            
-            // Draw multiple concentric rings for water ripple effect
-            const baseRadius = absVal * 3 + 20
-            const alpha = Math.min(absVal / 15, 0.7) * waterOpacity
-            
-            // Outer ring - cyan/blue
-            waterCtx.strokeStyle = `rgba(80, 180, 220, ${alpha * 0.6})`
-            waterCtx.lineWidth = 3
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, baseRadius, 0, Math.PI * 2)
-            waterCtx.stroke()
-            
-            // Middle ring - lighter
-            waterCtx.strokeStyle = `rgba(140, 210, 240, ${alpha * 0.8})`
-            waterCtx.lineWidth = 2
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, baseRadius * 0.65, 0, Math.PI * 2)
-            waterCtx.stroke()
-            
-            // Inner ring - bright highlight
-            waterCtx.strokeStyle = `rgba(200, 235, 255, ${alpha})`
-            waterCtx.lineWidth = 2
-            waterCtx.beginPath()
-            waterCtx.arc(px, py, baseRadius * 0.35, 0, Math.PI * 2)
-            waterCtx.stroke()
-            
-            // Center highlight spot
-            if (val > 0) {
-              const grad = waterCtx.createRadialGradient(px, py, 0, px, py, baseRadius * 0.25)
-              grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.5})`)
-              grad.addColorStop(1, `rgba(180, 220, 255, 0)`)
-              waterCtx.fillStyle = grad
-              waterCtx.beginPath()
-              waterCtx.arc(px, py, baseRadius * 0.25, 0, Math.PI * 2)
-              waterCtx.fill()
-            }
-          }
-        }
-      }
-      
-      waterCtx.restore()
     }
 
     animationRef.current = requestAnimationFrame(detectMotionAndRipple)
@@ -778,50 +681,58 @@ export default function WaterRipplePage() {
         <canvas
           ref={waterCanvasRef}
           className="absolute inset-0 h-full w-full object-cover"
-          style={{ display: isRunning ? "block" : "none", transform: "scaleX(-1)" }}
+          style={{ display: "none" }}
         />
         
-        {/* Water surface overlay effect */}
+        {/* Three.js Water Visualization */}
+        <ThreeWater
+          videoElement={videoElement}
+          rippleData={rippleData}
+          rippleWidth={rippleDimensions.width}
+          rippleHeight={rippleDimensions.height}
+          refractionStrength={rippleStrength / 150}
+          waterOpacity={waterOpacity}
+          isRunning={isRunning}
+        />
+        
+        {/* Water surface blue tint overlay */}
         {isRunning && (
           <div 
-            className="absolute inset-0 pointer-events-none"
+            className="absolute inset-0 pointer-events-none z-20"
             style={{
-              background: "linear-gradient(180deg, rgba(100, 200, 255, 0.05) 0%, rgba(50, 150, 255, 0.1) 100%)",
-              mixBlendMode: "overlay"
+              background: "linear-gradient(180deg, rgba(30, 100, 180, 0.08) 0%, rgba(20, 80, 150, 0.12) 100%)",
+              mixBlendMode: "multiply"
             }}
           />
         )}
 
-        {/* Floating AI-generated words */}
-        {floatingWords.map(word => (
-          <div
-            key={word.id}
-            className="absolute pointer-events-none select-none font-light tracking-wider z-50"
+        {/* Water Consciousness Text - Center Screen */}
+        {isRunning && waterText && (
+          <div 
+            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none px-8"
             style={{
-              left: `${word.x}%`,
-              top: `${word.y}%`,
-              opacity: word.opacity,
-              transform: `scale(${word.scale}) rotate(${word.rotation}deg)`,
-              fontSize: `${1.2 + word.scale * 0.8}rem`,
-              color: "rgba(255, 255, 255, 0.95)",
-              textShadow: "0 0 20px rgba(100, 200, 255, 0.8), 0 0 40px rgba(100, 200, 255, 0.5), 0 2px 4px rgba(0,0,0,0.5)",
-              willChange: "transform, opacity, left, top",
+              opacity: textOpacity,
+              transition: "opacity 1.5s ease-in-out"
             }}
           >
-            {word.text}
-          </div>
-        ))}
-
-        {/* API Response Display */}
-        {isRunning && lastApiResponse.length > 0 && (
-          <div className="absolute bottom-4 left-4 z-50 bg-black/60 backdrop-blur-sm rounded-lg p-3 max-w-xs">
-            <p className="text-cyan-400 text-xs uppercase tracking-wider mb-2">AI Keywords</p>
-            <div className="flex flex-wrap gap-2">
-              {lastApiResponse.map((word, i) => (
-                <span key={i} className="text-white/90 text-sm px-2 py-1 bg-cyan-500/20 rounded">
-                  {word}
-                </span>
-              ))}
+            <div 
+              className="max-w-2xl text-left"
+              style={{
+                backgroundColor: "rgba(0, 0, 0, 0.75)",
+                padding: "20px 32px",
+                borderRadius: "4px",
+              }}
+            >
+              <p 
+                className="text-white font-sans leading-relaxed"
+                style={{
+                  fontSize: "clamp(1.1rem, 2.5vw, 1.5rem)",
+                  textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
+                  letterSpacing: "0.01em",
+                }}
+              >
+                {waterText}
+              </p>
             </div>
           </div>
         )}
