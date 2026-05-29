@@ -456,12 +456,14 @@ export default function WaterRipplePage() {
       // Fade out after 8 seconds
       setTimeout(() => setTextOpacity(0), 8000)
       
-      // Generate video from the water consciousness text
-      generateVideo(text)
+      // Generate video from the water consciousness text (only if not already generating)
+      if (!isGeneratingVideo) {
+        generateVideo(text)
+      }
     } catch (err) {
       console.error("[v0] Failed to analyze screenshot:", err)
     }
-  }, [isRunning, generateVideo])
+  }, [isRunning, generateVideo, isGeneratingVideo])
 
   // Start/stop screenshot interval when running
   useEffect(() => {
