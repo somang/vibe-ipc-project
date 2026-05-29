@@ -456,14 +456,14 @@ export default function WaterRipplePage() {
       // Fade out after 8 seconds
       setTimeout(() => setTextOpacity(0), 8000)
       
-      // Generate video from the water consciousness text (only if not already generating)
+      // Generate video asynchronously (fire and forget, only if not already generating)
       if (!isGeneratingVideo) {
-        generateVideo(text)
+        generateVideo(text).catch(() => {})
       }
     } catch (err) {
       console.error("[v0] Failed to analyze screenshot:", err)
     }
-  }, [isRunning, generateVideo, isGeneratingVideo])
+  }, [isRunning, isGeneratingVideo])
 
   // Start/stop screenshot interval when running
   useEffect(() => {
@@ -810,13 +810,13 @@ export default function WaterRipplePage() {
           </div>
         )}
 
-        {/* Mini Video Player */}
+        {/* Video Player */}
         {isRunning && (generatedVideoUrl || isGeneratingVideo) && (
           <div 
             className="absolute bottom-6 right-6 z-50 rounded-lg overflow-hidden shadow-2xl"
             style={{
-              width: "180px",
-              height: "320px",
+              width: "280px",
+              height: "500px",
               backgroundColor: "rgba(0, 0, 0, 0.9)",
               border: "2px solid rgba(255, 255, 255, 0.2)",
             }}
@@ -824,8 +824,8 @@ export default function WaterRipplePage() {
             {isGeneratingVideo && !generatedVideoUrl && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
-                  <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-2" />
-                  <p className="text-white/60 text-xs">Generating...</p>
+                  <div className="w-10 h-10 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-white/60 text-sm">Generating...</p>
                 </div>
               </div>
             )}
