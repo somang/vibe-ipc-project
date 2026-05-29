@@ -105,6 +105,11 @@ export default function WaterRipplePage() {
   const [waterText, setWaterText] = useState<string>("")
   const [textOpacity, setTextOpacity] = useState(0)
   const screenshotIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Generated video state
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string>("")
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false)
+  const videoPollingRef = useRef<NodeJS.Timeout | null>(null)
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
@@ -351,6 +356,63 @@ export default function WaterRipplePage() {
   }, [isMuted, ambientVolume])
 
   // Capture screenshot and send to AI for analysis
+  // Poll for video completion
+  const pollVideoStatus = useCallback(async (videoId: string) => {
+    try {
+      const response = await fetch(`/api/generate-video?id=${videoId}`)
+      if (!response.ok) throw new Error("Failed to check video status")
+      
+      const data = await response.json()
+      
+      if (data.status === "completed" && data.output) {
+        setGeneratedVideoUrl(data.output)
+        setIsGeneratingVideo(false)
+        if (videoPollingRef.current) {
+          clearInterval(videoPollingRef.current)
+          videoPollingRef.current = null
+        }
+      } else if (data.status === "failed") {
+        setIsGeneratingVideo(false)
+        if (videoPollingRef.current) {
+          clearInterval(videoPollingRef.current)
+          videoPollingRef.current = null
+        }
+      }
+      // Continue polling if still pending
+    } catch (err) {
+      console.error("[v0] Error polling video status:", err)
+    }
+  }, [])
+
+  // Generate video from text
+  const generateVideo = useCallback(async (prompt: string) => {
+    if (isGeneratingVideo) return
+    
+    setIsGeneratingVideo(true)
+    
+    try {
+      const response = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      })
+      
+      if (!response.ok) throw new Error("Failed to start video generation")
+      
+      const data = await response.json()
+      
+      // Start polling for completion
+      if (data.id) {
+        videoPollingRef.current = setInterval(() => {
+          pollVideoStatus(data.id)
+        }, 2000)
+      }
+    } catch (err) {
+      console.error("[v0] Error generating video:", err)
+      setIsGeneratingVideo(false)
+    }
+  }, [isGeneratingVideo, pollVideoStatus])
+
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !isRunning) return
     
@@ -393,10 +455,13 @@ export default function WaterRipplePage() {
       
       // Fade out after 8 seconds
       setTimeout(() => setTextOpacity(0), 8000)
+      
+      // Generate video from the water consciousness text
+      generateVideo(text)
     } catch (err) {
       console.error("[v0] Failed to analyze screenshot:", err)
     }
-  }, [isRunning])
+  }, [isRunning, generateVideo])
 
   // Start/stop screenshot interval when running
   useEffect(() => {
@@ -498,6 +563,10 @@ export default function WaterRipplePage() {
       clearInterval(screenshotIntervalRef.current)
       screenshotIntervalRef.current = null
     }
+    if (videoPollingRef.current) {
+      clearInterval(videoPollingRef.current)
+      videoPollingRef.current = null
+    }
   stopAmbientMusic()
   ambientStartedRef.current = false
   setIsRunning(false)
@@ -505,6 +574,8 @@ export default function WaterRipplePage() {
   setWaterText("")
   setTextOpacity(0)
   setVideoElement(null)
+  setGeneratedVideoUrl("")
+  setIsGeneratingVideo(false)
   }, [stopAmbientMusic])
 
   const detectMotionAndRipple = useCallback(() => {
@@ -734,6 +805,38 @@ export default function WaterRipplePage() {
                 {waterText}
               </p>
             </div>
+          </div>
+        )}
+
+        {/* Mini Video Player */}
+        {isRunning && (generatedVideoUrl || isGeneratingVideo) && (
+          <div 
+            className="absolute bottom-6 right-6 z-50 rounded-lg overflow-hidden shadow-2xl"
+            style={{
+              width: "180px",
+              height: "320px",
+              backgroundColor: "rgba(0, 0, 0, 0.9)",
+              border: "2px solid rgba(255, 255, 255, 0.2)",
+            }}
+          >
+            {isGeneratingVideo && !generatedVideoUrl && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-2" />
+                  <p className="text-white/60 text-xs">Generating...</p>
+                </div>
+              </div>
+            )}
+            {generatedVideoUrl && (
+              <video
+                src={generatedVideoUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            )}
           </div>
         )}
 
