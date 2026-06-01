@@ -110,6 +110,9 @@ export default function WaterRipplePage() {
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string>("")
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false)
   const videoPollingRef = useRef<NodeJS.Timeout | null>(null)
+  const videoTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const videoStartTimeRef = useRef<number>(0)
+  const [videoFloatOffset, setVideoFloatOffset] = useState({ x: 0, y: 0 })
 
   const animationRef = useRef<number>()
   const streamRef = useRef<MediaStream | null>(null)
@@ -359,26 +362,44 @@ export default function WaterRipplePage() {
   // Poll for video completion
   const pollVideoStatus = useCallback(async (videoId: string) => {
     try {
+      const elapsed = Date.now() - videoStartTimeRef.current
+      console.log(`[v0] Polling video status for ${videoId}, elapsed: ${Math.round(elapsed / 1000)}s`)
+      
       const response = await fetch(`/api/generate-video?id=${videoId}`)
-      if (!response.ok) throw new Error("Failed to check video status")
+      if (!response.ok) {
+        console.log("[v0] Poll response not ok:", response.status)
+        throw new Error("Failed to check video status")
+      }
       
       const data = await response.json()
+      console.log("[v0] Video poll response:", data)
       
       if (data.status === "completed" && data.output) {
+        console.log("[v0] Video generation completed! URL:", data.output)
         setGeneratedVideoUrl(data.output)
         setIsGeneratingVideo(false)
         if (videoPollingRef.current) {
           clearInterval(videoPollingRef.current)
           videoPollingRef.current = null
         }
+        if (videoTimeoutRef.current) {
+          clearTimeout(videoTimeoutRef.current)
+          videoTimeoutRef.current = null
+        }
       } else if (data.status === "failed") {
+        console.log("[v0] Video generation failed")
         setIsGeneratingVideo(false)
         if (videoPollingRef.current) {
           clearInterval(videoPollingRef.current)
           videoPollingRef.current = null
         }
+        if (videoTimeoutRef.current) {
+          clearTimeout(videoTimeoutRef.current)
+          videoTimeoutRef.current = null
+        }
+      } else {
+        console.log("[v0] Video still pending, status:", data.status)
       }
-      // Continue polling if still pending
     } catch (err) {
       console.error("[v0] Error polling video status:", err)
     }
@@ -386,9 +407,14 @@ export default function WaterRipplePage() {
 
   // Generate video from text
   const generateVideo = useCallback(async (prompt: string) => {
-    if (isGeneratingVideo) return
+    if (isGeneratingVideo) {
+      console.log("[v0] Video generation already in progress, skipping")
+      return
+    }
     
+    console.log("[v0] Starting video generation with prompt:", prompt.substring(0, 50) + "...")
     setIsGeneratingVideo(true)
+    videoStartTimeRef.current = Date.now()
     
     try {
       const response = await fetch("/api/generate-video", {
@@ -397,15 +423,29 @@ export default function WaterRipplePage() {
         body: JSON.stringify({ prompt }),
       })
       
-      if (!response.ok) throw new Error("Failed to start video generation")
+      if (!response.ok) {
+        console.log("[v0] Video API response not ok:", response.status)
+        throw new Error("Failed to start video generation")
+      }
       
       const data = await response.json()
+      console.log("[v0] Video generation started, ID:", data.id)
       
       // Start polling for completion
       if (data.id) {
         videoPollingRef.current = setInterval(() => {
           pollVideoStatus(data.id)
         }, 2000)
+        
+        // Set 60 second timeout
+        videoTimeoutRef.current = setTimeout(() => {
+          console.log("[v0] Video generation timed out after 60 seconds")
+          if (videoPollingRef.current) {
+            clearInterval(videoPollingRef.current)
+            videoPollingRef.current = null
+          }
+          setIsGeneratingVideo(false)
+        }, 60000)
       }
     } catch (err) {
       console.error("[v0] Error generating video:", err)
@@ -492,6 +532,31 @@ export default function WaterRipplePage() {
       setTextOpacity(0)
     }
   }, [isRunning, captureAndAnalyze])
+
+  // Animate video player floating on ripples
+  useEffect(() => {
+    if (!isRunning || rippleData.length === 0) return
+    
+    const animateFloat = () => {
+      // Sample ripple data at bottom-right area where video player is
+      const w = rippleDimensions.width
+      const h = rippleDimensions.height
+      const sampleX = Math.floor(w * 0.85)
+      const sampleY = Math.floor(h * 0.85)
+      const idx = sampleY * w + sampleX
+      
+      if (rippleData[idx] !== undefined) {
+        const val = rippleData[idx]
+        // Create subtle floating motion based on ripple value
+        const offsetX = Math.sin(Date.now() / 500) * 3 + (val / 10)
+        const offsetY = Math.cos(Date.now() / 400) * 4 + (val / 8)
+        setVideoFloatOffset({ x: offsetX, y: offsetY })
+      }
+    }
+    
+    const interval = setInterval(animateFloat, 50)
+    return () => clearInterval(interval)
+  }, [isRunning, rippleData, rippleDimensions])
 
   const startCamera = async () => {
     setError(null)
